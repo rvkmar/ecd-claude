@@ -1,0 +1,156 @@
+{
+  "competencyModels": [
+    {
+      "name": "Grade 6 Numeracy",
+      "description": "Core numeracy competencies expected of a Grade 6 learner, covering number sense, fractions, and basic algebraic reasoning.",
+      "measurementIntent": "unidimensional",
+      "constructFramework": {
+        "reference": "National Numeracy Framework",
+        "citation": "",
+        "notes": "Draft model for bulk-import testing."
+      },
+      "competencies": [
+        {
+          "name": "Whole Number Operations",
+          "description": "Ability to add, subtract, multiply, and divide multi-digit whole numbers accurately.",
+          "variableType": "binary",
+          "states": [
+            { "value": "not_mastered", "label": "Not Mastered", "description": "Cannot reliably perform multi-digit operations.", "order": 0 },
+            { "value": "mastered", "label": "Mastered", "description": "Performs multi-digit operations accurately.", "order": 1 }
+          ],
+          "domain": "Mathematics",
+          "strand": "Number",
+          "facet": "Computation"
+        },
+        {
+          "name": "Fraction Reasoning",
+          "description": "Ability to compare, order, and perform operations with fractions.",
+          "variableType": "ordinal",
+          "states": [
+            { "value": "beginning", "label": "Beginning", "description": "Identifies fractions only with support.", "order": 1 },
+            { "value": "developing", "label": "Developing", "description": "Compares and orders simple fractions.", "order": 2 },
+            { "value": "proficient", "label": "Proficient", "description": "Performs operations with unlike denominators.", "order": 3 }
+          ],
+          "domain": "Mathematics",
+          "strand": "Number",
+          "facet": "Fractions"
+        },
+        {
+          "name": "Pre-Algebraic Reasoning",
+          "description": "Ability to recognize patterns and represent simple unknowns in equations.",
+          "variableType": "ordinal",
+          "states": [
+            { "value": "beginning", "label": "Beginning", "description": "Extends simple repeating patterns.", "order": 1 },
+            { "value": "developing", "label": "Developing", "description": "Solves one-step equations with a single unknown.", "order": 2 },
+            { "value": "proficient", "label": "Proficient", "description": "Solves two-step equations and generalizes patterns.", "order": 3 }
+          ],
+          "domain": "Mathematics",
+          "strand": "Algebra",
+          "facet": "Patterns & Equations"
+        },
+        {
+          "name": "Measurement & Data",
+          "description": "Ability to measure quantities accurately and interpret simple data displays.",
+          "variableType": "categorical",
+          "states": [
+            { "value": "length_mass", "label": "Length & Mass", "description": "Measures length and mass using standard units.", "order": 1 },
+            { "value": "data_display", "label": "Data Display", "description": "Reads and interprets bar graphs and tables.", "order": 2 },
+            { "value": "unit_conversion", "label": "Unit Conversion", "description": "Converts between related units of measure.", "order": 3 }
+          ],
+          "domain": "Mathematics",
+          "strand": "Measurement & Data",
+          "facet": "Application"
+        },
+        {
+          "name": "Quantitative Reasoning Ability",
+          "description": "Overall latent ability to reason quantitatively across numeracy tasks, reported on a continuous scale.",
+          "variableType": "continuous",
+          "scale": {
+            "min": -3,
+            "max": 3,
+            "interpretationGuide": "Theta scale; 0 represents grade-level expectation."
+          },
+          "domain": "Mathematics",
+          "strand": "Cross-Strand",
+          "facet": "Overall Ability"
+        }
+      ]
+    },
+    {
+      "name": "Middle School Scientific Inquiry",
+      "description": "Competencies related to scientific inquiry practices expected of middle school students.",
+      "measurementIntent": "multidimensional",
+      "constructFramework": {
+        "reference": "Next Generation Science Standards (adapted)",
+        "citation": "",
+        "notes": "Draft model for bulk-import testing."
+      },
+      "competencies": [
+        {
+          "name": "Hypothesis Formation",
+          "description": "Ability to formulate testable hypotheses based on observations.",
+          "variableType": "binary",
+          "states": [
+            { "value": "not_mastered", "label": "Not Mastered", "description": "Cannot form a testable hypothesis.", "order": 0 },
+            { "value": "mastered", "label": "Mastered", "description": "Forms clear, testable hypotheses.", "order": 1 }
+          ],
+          "domain": "Science",
+          "strand": "Inquiry",
+          "facet": "Hypothesis Formation"
+        },
+        {
+          "name": "Experimental Design",
+          "description": "Ability to design a fair test that isolates a single variable.",
+          "variableType": "ordinal",
+          "states": [
+            { "value": "beginning", "label": "Beginning", "description": "Designs experiments with uncontrolled variables.", "order": 1 },
+            { "value": "developing", "label": "Developing", "description": "Controls one variable at a time with guidance.", "order": 2 },
+            { "value": "proficient", "label": "Proficient", "description": "Independently designs controlled experiments.", "order": 3 }
+          ],
+          "domain": "Science",
+          "strand": "Inquiry",
+          "facet": "Experimental Design"
+        },
+        {
+          "name": "Data Interpretation",
+          "description": "Ability to interpret experimental data and draw evidence-based conclusions.",
+          "variableType": "ordinal",
+          "states": [
+            { "value": "beginning", "label": "Beginning", "description": "Restates data without interpretation.", "order": 1 },
+            { "value": "developing", "label": "Developing", "description": "Identifies basic trends in data.", "order": 2 },
+            { "value": "proficient", "label": "Proficient", "description": "Draws well-supported conclusions from data.", "order": 3 }
+          ],
+          "domain": "Science",
+          "strand": "Inquiry",
+          "facet": "Data Interpretation"
+        },
+        {
+          "name": "Scientific Communication",
+          "description": "Ability to communicate scientific findings clearly using appropriate terminology and evidence.",
+          "variableType": "categorical",
+          "states": [
+            { "value": "written_report", "label": "Written Report", "description": "Communicates findings in written lab reports.", "order": 1 },
+            { "value": "oral_presentation", "label": "Oral Presentation", "description": "Communicates findings orally with visual aids.", "order": 2 },
+            { "value": "peer_critique", "label": "Peer Critique", "description": "Gives and responds to constructive scientific critique.", "order": 3 }
+          ],
+          "domain": "Science",
+          "strand": "Communication",
+          "facet": "Reporting"
+        },
+        {
+          "name": "Model-Based Reasoning",
+          "description": "Ability to use and revise scientific models to explain phenomena.",
+          "variableType": "continuous",
+          "scale": {
+            "min": -3,
+            "max": 3,
+            "interpretationGuide": "Theta scale; 0 represents grade-level expectation."
+          },
+          "domain": "Science",
+          "strand": "Modeling",
+          "facet": "Overall Ability"
+        }
+      ]
+    }
+  ]
+}

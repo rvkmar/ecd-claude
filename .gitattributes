@@ -1,0 +1,30 @@
+# Line-ending policy for this repo.
+#
+# This project has always been edited on Windows (CRLF), and that's the
+# working-tree convention going forward. Left unconfigured, git guesses at
+# line-ending handling per-checkout, which is what caused a whole-tree
+# CRLF/LF mismatch between the working tree and a recent commit (every
+# tracked file showed as "fully modified" even though `git diff -b` proved
+# there were zero real content changes). This file pins the behavior so
+# that doesn't happen again.
+#
+# Default: treat text files as text, normalize them internally for diffing,
+# and check them out as CRLF (matching how this project is actually edited).
+* text=auto eol=crlf
+
+# Exception: shell scripts must stay LF. They run inside Linux containers
+# (see r-backend/app/dev-start.sh) — a CRLF shebang/script line can break
+# silently under `sh`/`bash` even though it looks fine in a Windows editor.
+*.sh text eol=lf
+
+# Binary files — never treat as text, never diff, never convert.
+*.rds binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.tar.gz binary
+*.zip binary

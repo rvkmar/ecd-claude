@@ -1,0 +1,83 @@
+[
+  {
+    "taskModelId": "<REPLACE_WITH_REAL_CONFIRMED_TASK_MODEL_ID>",
+    "observationId": "obs_equivalent_fractions",
+    "stimulus": {
+      "layout": "single",
+      "blocks": [
+        { "type": "text", "content": "Which fraction is equivalent to 2/4?" }
+      ]
+    },
+    "interaction": {
+      "type": "MCQ",
+      "responseComponents": [
+        { "id": "opt_a", "label": "1/2" },
+        { "id": "opt_b", "label": "3/8" },
+        { "id": "opt_c", "label": "2/3" },
+        { "id": "opt_d", "label": "5/6" }
+      ]
+    },
+    "scoring": {
+      "method": "binary",
+      "maxScore": 1,
+      "evidenceActivationMap": [
+        {
+          "responsePattern": { "selected": "opt_a" },
+          "activatesObservable": true,
+          "strengthOverride": 4,
+          "rationale": "Selecting 1/2 demonstrates recognition that 2/4 and 1/2 represent the same value."
+        },
+        {
+          "responsePattern": { "selected": ["opt_b", "opt_c", "opt_d"] },
+          "activatesObservable": false,
+          "rationale": "Distractors reflect common non-equivalence errors and do not support the observable."
+        }
+      ]
+    },
+    "learningDomain": "cognitive",
+    "cognitiveDemand": { "bloomLevel": "Apply" },
+    "metadata": { "gradeBand": "6", "subject": "Mathematics", "tags": ["fractions", "equivalence"] },
+    "psychometrics": { "statisticalModelType": "1PL" },
+    "exposureControl": { "maxUsageBeforeRetire": 500, "maxReactivations": 2 }
+  },
+  {
+    "taskModelId": "<REPLACE_WITH_REAL_CONFIRMED_TASK_MODEL_ID_2>",
+    "observationId": "obs_fraction_comparison",
+    "stimulus": {
+      "layout": "single",
+      "blocks": [
+        { "type": "text", "content": "Which fraction is larger: 3/5 or 5/8?" }
+      ]
+    },
+    "interaction": {
+      "type": "MCQ",
+      "responseComponents": [
+        { "id": "opt_a", "label": "3/5" },
+        { "id": "opt_b", "label": "5/8" },
+        { "id": "opt_c", "label": "They are equal" }
+      ]
+    },
+    "scoring": {
+      "method": "binary",
+      "maxScore": 1,
+      "evidenceActivationMap": [
+        {
+          "responsePattern": { "selected": "opt_b" },
+          "activatesObservable": true,
+          "strengthOverride": 3,
+          "rationale": "Correctly identifying 5/8 as larger demonstrates magnitude comparison reasoning."
+        },
+        {
+          "responsePattern": { "selected": ["opt_a", "opt_c"] },
+          "activatesObservable": false,
+          "rationale": "Incorrect or non-committal responses do not support the observable."
+        }
+      ]
+    },
+    "learningDomain": "cognitive",
+    "cognitiveDemand": { "bloomLevel": "Analyze" },
+    "metadata": { "gradeBand": "6", "subject": "Mathematics", "tags": ["fractions", "comparison"] },
+    "psychometrics": { "statisticalModelType": "1PL" },
+    "exposureControl": { "maxUsageBeforeRetire": 500, "maxReactivations": 2 }
+  }
+]

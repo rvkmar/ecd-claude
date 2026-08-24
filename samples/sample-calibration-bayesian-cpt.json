@@ -1,0 +1,58 @@
+{
+  "calibrationFileVersion": "1.0",
+  "kind": "bayesian-cpt",
+
+  "target": {
+    "evidenceModelName": "Numerical Reasoning Evidence Model (Bayesian variant)",
+    "note": "The keys of `prior` and of every `cpt.<observable>.levels` block must be the competency's declared state values, in the competency's own order. L1/L2/L3 below match the three-state default used by the Evidence Wizard's CPT editor — change them to your competency's real state values before uploading.",
+    "statisticalModel": {
+      "type": "bayesian_network",
+      "subtype": "discrete"
+    }
+  },
+
+  "provenance": {
+    "calibratedBy": "psychometrics.unit@example.org",
+    "calibrationMethod": "EM estimation of conditional probability tables (bnlearn, structural EM disabled)",
+    "calibrationDate": "2026-06-18",
+    "sampleSize": 3140,
+    "population": "Grade 6, Tamil Nadu state sample, June 2026 administration",
+    "software": "R 4.4.1 / bnlearn 4.9",
+    "notes": "Structure was fixed by the evidence model; only the conditional probability tables and the population prior were estimated."
+  },
+
+  "prior": {
+    "L1": 0.30,
+    "L2": 0.45,
+    "L3": 0.25
+  },
+
+  "cpt": {
+    "o1": {
+      "levels": { "L1": 0.12, "L2": 0.46, "L3": 0.88 },
+      "n": 3140
+    },
+    "o2": {
+      "levels": { "L1": 0.21, "L2": 0.58, "L3": 0.91 },
+      "n": 3137
+    },
+    "o3": {
+      "levels": { "L1": 0.34, "L2": 0.69, "L3": 0.93 },
+      "n": 3140
+    }
+  },
+
+  "fit": {
+    "logLik": -5218.77,
+    "BIC": 10489.31,
+    "classificationAccuracy": 0.79,
+    "expectedPosteriorEntropy": 0.62
+  },
+
+  "decisionRule": {
+    "type": "classification",
+    "threshold": 0.6,
+    "direction": "above",
+    "justification": "A state is reported only when its posterior probability exceeds 0.60 under the June 2026 calibration; below that the result is reported as indeterminate rather than assigned to a level."
+  }
+}

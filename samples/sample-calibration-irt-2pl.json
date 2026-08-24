@@ -1,0 +1,82 @@
+{
+  "calibrationFileVersion": "1.0",
+  "kind": "irt-parameters",
+
+  "target": {
+    "evidenceModelName": "Numerical Reasoning Evidence Model",
+    "note": "Observable ids below must match the evidence model's observables[].id and the active statistical model's structureConfig.observableIds. They match samples/sample-evidence-model.json as shipped (o1, o2, o3).",
+    "statisticalModel": {
+      "type": "irt",
+      "subtype": "2pl"
+    }
+  },
+
+  "provenance": {
+    "calibratedBy": "psychometrics.unit@example.org",
+    "calibrationMethod": "R mirt 2PL marginal maximum likelihood (MML-EM)",
+    "calibrationDate": "2026-06-18",
+    "sampleSize": 4821,
+    "population": "Grade 6, Tamil Nadu state sample, June 2026 administration",
+    "software": "R 4.4.1 / mirt 1.42",
+    "notes": "Free calibration on the June 2026 pilot. Difficulties centred on the pilot sample; no linking to a prior form."
+  },
+
+  "scale": {
+    "metric": "theta",
+    "mean": 0,
+    "sd": 1,
+    "linking": "none — this administration defines the base scale"
+  },
+
+  "parameters": {
+    "o1": {
+      "a": 1.42,
+      "b": 0.38,
+      "se_a": 0.09,
+      "se_b": 0.05,
+      "infit": 0.97,
+      "outfit": 1.02,
+      "pValue": 0.41,
+      "pointBiserial": 0.52,
+      "n": 4821
+    },
+    "o2": {
+      "a": 1.08,
+      "b": -0.12,
+      "se_a": 0.07,
+      "se_b": 0.04,
+      "infit": 1.05,
+      "outfit": 1.09,
+      "pValue": 0.53,
+      "pointBiserial": 0.44,
+      "n": 4818
+    },
+    "o3": {
+      "a": 0.86,
+      "b": -0.74,
+      "se_a": 0.06,
+      "se_b": 0.05,
+      "infit": 1.11,
+      "outfit": 1.14,
+      "pValue": 0.68,
+      "pointBiserial": 0.37,
+      "n": 4821
+    }
+  },
+
+  "fit": {
+    "logLik": -8734.21,
+    "AIC": 17480.42,
+    "BIC": 17519.36,
+    "RMSEA": 0.028,
+    "CFI": 0.991,
+    "marginalReliability": 0.71
+  },
+
+  "decisionRule": {
+    "type": "posterior_threshold",
+    "threshold": 0.35,
+    "direction": "above",
+    "justification": "Cut set by the June 2026 standard-setting panel (modified Angoff) and expressed on the theta scale of this calibration; marginal reliability 0.71 at the cut."
+  }
+}

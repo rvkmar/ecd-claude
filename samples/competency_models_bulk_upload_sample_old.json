@@ -1,0 +1,228 @@
+{
+  "competencyModels": [
+    {
+      "modelId": "CM-DATA-SCI-001",
+      "name": "Data Science Professional Competency Model",
+      "description": "Defines the core competencies required for data science roles, from junior analyst to senior data scientist, aligned to an Evidence Centred Design (ECD) assessment framework.",
+      "version": "1.0",
+      "domain": "Data Science & Analytics",
+      "status": "active",
+      "competencies": [
+        {
+          "competencyId": "DS-COMP-01",
+          "name": "Statistical Reasoning",
+          "description": "Ability to apply statistical concepts and methods to draw valid conclusions from data.",
+          "category": "Cognitive",
+          "levels": [
+            { "level": 1, "label": "Novice", "descriptor": "Understands basic descriptive statistics (mean, median, variance)." },
+            { "level": 2, "label": "Proficient", "descriptor": "Applies hypothesis testing and confidence intervals correctly." },
+            { "level": 3, "label": "Expert", "descriptor": "Designs experiments and selects appropriate inferential methods for complex problems." }
+          ],
+          "indicators": [
+            "Correctly interprets p-values and confidence intervals",
+            "Selects appropriate statistical test for a given data type",
+            "Identifies violations of statistical assumptions"
+          ],
+          "weight": 0.2
+        },
+        {
+          "competencyId": "DS-COMP-02",
+          "name": "Programming & Data Manipulation",
+          "description": "Proficiency in writing efficient code to clean, transform, and analyze data.",
+          "category": "Technical",
+          "levels": [
+            { "level": 1, "label": "Novice", "descriptor": "Writes basic scripts to load and filter data." },
+            { "level": 2, "label": "Proficient", "descriptor": "Builds reusable data pipelines with error handling." },
+            { "level": 3, "label": "Expert", "descriptor": "Optimizes large-scale data processing workflows." }
+          ],
+          "indicators": [
+            "Writes clean, documented, version-controlled code",
+            "Uses vectorized operations for performance",
+            "Handles missing and malformed data robustly"
+          ],
+          "weight": 0.2
+        },
+        {
+          "competencyId": "DS-COMP-03",
+          "name": "Machine Learning Modeling",
+          "description": "Ability to select, train, tune, and evaluate machine learning models appropriate to a business problem.",
+          "category": "Technical",
+          "levels": [
+            { "level": 1, "label": "Novice", "descriptor": "Trains a single baseline model using default parameters." },
+            { "level": 2, "label": "Proficient", "descriptor": "Compares multiple algorithms and tunes hyperparameters systematically." },
+            { "level": 3, "label": "Expert", "descriptor": "Designs custom modeling approaches and diagnoses bias-variance tradeoffs." }
+          ],
+          "indicators": [
+            "Selects model class appropriate to problem and data",
+            "Applies cross-validation to avoid overfitting",
+            "Explains model performance using appropriate metrics"
+          ],
+          "weight": 0.25
+        },
+        {
+          "competencyId": "DS-COMP-04",
+          "name": "Data Visualization & Communication",
+          "description": "Ability to translate analytical findings into clear visual and narrative form for varied audiences.",
+          "category": "Communication",
+          "levels": [
+            { "level": 1, "label": "Novice", "descriptor": "Produces basic charts with correct labeling." },
+            { "level": 2, "label": "Proficient", "descriptor": "Designs dashboards tailored to stakeholder needs." },
+            { "level": 3, "label": "Expert", "descriptor": "Crafts compelling data narratives that drive decisions." }
+          ],
+          "indicators": [
+            "Chooses chart type appropriate to the data and message",
+            "Avoids misleading visual encodings",
+            "Tailors communication style to audience expertise"
+          ],
+          "weight": 0.15
+        },
+        {
+          "competencyId": "DS-COMP-05",
+          "name": "Ethical & Responsible AI Practice",
+          "description": "Awareness of fairness, privacy, and governance considerations in data-driven work.",
+          "category": "Ethics & Governance",
+          "levels": [
+            { "level": 1, "label": "Novice", "descriptor": "Recognizes common sources of bias in data." },
+            { "level": 2, "label": "Proficient", "descriptor": "Applies fairness checks and documents data provenance." },
+            { "level": 3, "label": "Expert", "descriptor": "Leads governance reviews and mitigates systemic bias risks." }
+          ],
+          "indicators": [
+            "Identifies potential bias or privacy risk in a dataset",
+            "Applies relevant data protection principles",
+            "Documents model limitations and intended use"
+          ],
+          "weight": 0.1
+        },
+        {
+          "competencyId": "DS-COMP-06",
+          "name": "Business Problem Framing",
+          "description": "Ability to translate an ambiguous business question into a well-defined analytical problem.",
+          "category": "Cognitive",
+          "levels": [
+            { "level": 1, "label": "Novice", "descriptor": "Restates a business question in analytical terms with guidance." },
+            { "level": 2, "label": "Proficient", "descriptor": "Independently scopes an analysis plan aligned to business goals." },
+            { "level": 3, "label": "Expert", "descriptor": "Anticipates downstream business impact and reframes problems proactively." }
+          ],
+          "indicators": [
+            "Clarifies success metrics before starting analysis",
+            "Identifies relevant data sources for a business question",
+            "Aligns analytical scope with stakeholder priorities"
+          ],
+          "weight": 0.1
+        }
+      ]
+    },
+    {
+      "modelId": "CM-LEADERSHIP-001",
+      "name": "People Leadership Competency Model",
+      "description": "Core competencies for people managers responsible for leading teams, aligned to an ECD assessment framework for leadership development programs.",
+      "version": "1.0",
+      "domain": "Leadership & Management",
+      "status": "active",
+      "competencies": [
+        {
+          "competencyId": "LD-COMP-01",
+          "name": "Strategic Thinking",
+          "description": "Ability to align team goals with broader organizational strategy and anticipate future needs.",
+          "category": "Cognitive",
+          "levels": [
+            { "level": 1, "label": "Developing", "descriptor": "Understands team goals in relation to department objectives." },
+            { "level": 2, "label": "Proficient", "descriptor": "Connects team priorities to organizational strategy." },
+            { "level": 3, "label": "Advanced", "descriptor": "Shapes strategy and anticipates market or organizational shifts." }
+          ],
+          "indicators": [
+            "Articulates how team work supports company goals",
+            "Anticipates risks and opportunities in planning",
+            "Balances short-term delivery with long-term direction"
+          ],
+          "weight": 0.2
+        },
+        {
+          "competencyId": "LD-COMP-02",
+          "name": "Coaching & Development",
+          "description": "Ability to support the growth of individual team members through feedback and development planning.",
+          "category": "Interpersonal",
+          "levels": [
+            { "level": 1, "label": "Developing", "descriptor": "Gives basic performance feedback when prompted." },
+            { "level": 2, "label": "Proficient", "descriptor": "Proactively coaches team members using structured feedback models." },
+            { "level": 3, "label": "Advanced", "descriptor": "Builds development plans that grow future leaders." }
+          ],
+          "indicators": [
+            "Delivers specific, actionable feedback",
+            "Creates individualized growth plans",
+            "Recognizes and nurtures team member strengths"
+          ],
+          "weight": 0.2
+        },
+        {
+          "competencyId": "LD-COMP-03",
+          "name": "Decision Making",
+          "description": "Ability to make timely, well-reasoned decisions under uncertainty.",
+          "category": "Cognitive",
+          "levels": [
+            { "level": 1, "label": "Developing", "descriptor": "Makes routine decisions with clear guidelines." },
+            { "level": 2, "label": "Proficient", "descriptor": "Weighs tradeoffs and makes sound decisions with incomplete information." },
+            { "level": 3, "label": "Advanced", "descriptor": "Makes high-stakes decisions and owns outcomes transparently." }
+          ],
+          "indicators": [
+            "Gathers relevant input before deciding",
+            "Considers multiple options and their tradeoffs",
+            "Takes ownership and adjusts course when needed"
+          ],
+          "weight": 0.15
+        },
+        {
+          "competencyId": "LD-COMP-04",
+          "name": "Communication & Influence",
+          "description": "Ability to communicate clearly and influence outcomes without formal authority.",
+          "category": "Communication",
+          "levels": [
+            { "level": 1, "label": "Developing", "descriptor": "Communicates clearly within the immediate team." },
+            { "level": 2, "label": "Proficient", "descriptor": "Adapts communication style across stakeholders." },
+            { "level": 3, "label": "Advanced", "descriptor": "Influences senior stakeholders and drives organizational alignment." }
+          ],
+          "indicators": [
+            "Tailors message to audience and context",
+            "Builds consensus across differing viewpoints",
+            "Communicates difficult messages with clarity and empathy"
+          ],
+          "weight": 0.15
+        },
+        {
+          "competencyId": "LD-COMP-05",
+          "name": "Team Building & Collaboration",
+          "description": "Ability to build a cohesive, high-performing team culture.",
+          "category": "Interpersonal",
+          "levels": [
+            { "level": 1, "label": "Developing", "descriptor": "Participates constructively in team activities." },
+            { "level": 2, "label": "Proficient", "descriptor": "Fosters collaboration and resolves interpersonal conflicts." },
+            { "level": 3, "label": "Advanced", "descriptor": "Builds a strong team culture that scales across the organization." }
+          ],
+          "indicators": [
+            "Facilitates effective team collaboration",
+            "Resolves conflict constructively",
+            "Promotes psychological safety within the team"
+          ],
+          "weight": 0.15
+        },
+        {
+          "competencyId": "LD-COMP-06",
+          "name": "Accountability & Execution",
+          "description": "Ability to drive results and hold self and others accountable for commitments.",
+          "category": "Execution",
+          "levels": [
+            { "level": 1, "label": "Developing", "descriptor": "Meets individual commitments consistently." },
+            { "level": 2, "label": "Proficient", "descriptor": "Holds team accountable to shared goals and deadlines." },
+            { "level": 3, "label": "Advanced", "descriptor": "Establishes accountability systems that scale across teams." }
+          ],
+          "indicators": [
+            "Sets clear expectations and deadlines",
+            "Follows through on commitments",
+            "Addresses underperformance directly and fairly"
+          ],
+          "weight": 0.15
+        }
+      ]
+    }
+  ]
+}
