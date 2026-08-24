@@ -1,0 +1,402 @@
+// usersRoutes.js
+// Authentication and user management for ecd-assessment
+
+import express from "express";
+import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
+import rateLimit from "express-rate-limit";
+import { dbAdapter } from "../utils/dbAdapter.js";
+import { authenticateToken, authorizeRole } from "../utils/authMiddleware.js";
+import { JWT_SECRET, TOKEN_EXPIRES_IN } from "../config/jwt.js";
+import { validateEntity } from "../../src/utils/schema.js";
+import { generateTempPassword } from "../../src/utils/generatePassword.js";
+
+const router = express.Router();
+
+const VALID_ROLES = ["admin", "district", "teacher", "student"];
+
+// Per-IP brute-force throttle on the login endpoint. This used to be defined
+// in server/index.js but was only ever wired to a dead, commented-out
+// duplicate login route — the real route below had no rate limiting at all.
+const loginLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10,
+  message: { error: "Too many login attempts from this address. Please try again shortly." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Per-account lockout on top of the per-IP limiter above, so a distributed
+// attempt across many IPs against a single known username is still blocked.
+// In-memory only (fine for a single-instance deployment; move to a shared
+// store such as Redis if this API is ever scaled horizontally).
+const MAX_FAILED_ATTEMPTS = 5;
+const LOCKOUT_MS = 15 * 60 * 1000; // 15 minutes
+const failedAttempts = new Map(); // username -> { count, lockedUntil }
+
+function getLockoutState(username) {
+  const entry = failedAttempts.get(username);
+  if (!entry) return { locked: false };
+  if (entry.lockedUntil && entry.lockedUntil > Date.now()) {
+    return { locked: true, retryAfterMs: entry.lockedUntil - Date.now() };
+  }
+  return { locked: false };
+}
+
+function recordFailedAttempt(username) {
+  const entry = failedAttempts.get(username) || { count: 0, lockedUntil: null };
+  entry.count += 1;
+  if (entry.count >= MAX_FAILED_ATTEMPTS) {
+    entry.lockedUntil = Date.now() + LOCKOUT_MS;
+    entry.count = 0;
+  }
+  failedAttempts.set(username, entry);
+}
+
+function clearFailedAttempts(username) {
+  failedAttempts.delete(username);
+}
+
+function toSafeUser(u) {
+  if (!u) return u;
+  const { password, ...safe } = u;
+  return safe;
+}
+
+// ------------------------------
+// Shared create-user logic, used by both POST / (single) and POST /bulk.
+// Returns { ok, status, error, user } rather than writing to `res` directly
+// so the bulk importer can call this once per row and collect per-row
+// results instead of duplicating the validation/hashing/insert logic.
+// ------------------------------
+export async function createUserRecord(payload = {}) {
+  const { username, password, role, email, profile } = payload;
+
+  if (!username || !password || !role) {
+    return { ok: false, status: 400, error: "username, password, and role are required" };
+  }
+  if (!VALID_ROLES.includes(role)) {
+    return { ok: false, status: 400, error: `role must be one of: ${VALID_ROLES.join(", ")}` };
+  }
+
+  const users = await dbAdapter.list("users");
+  if (users.some((u) => u.username === username)) {
+    return { ok: false, status: 400, error: "Username already exists" };
+  }
+
+  const hashed = await bcrypt.hash(password, 10);
+  const newUser = {
+    // Every other collection in this app is keyed by a synthetic `id` field
+    // that dbAdapter.get/update/remove all match against. Users never had
+    // one — DELETE /api/users/:username fell back to `target.id ||
+    // target._id?.toString()`, and in JSON DB_MODE neither existed, so
+    // dbAdapter.remove("users", undefined) matched (and wiped) every user
+    // whose `.id` was also undefined, i.e. all of them. Using the username
+    // itself as `id` gives every user record a stable, unique key that
+    // dbAdapter's generic id-based lookups can actually find.
+    id: username,
+    username,
+    password: hashed,
+    role,
+    email: email || "",
+    profile: profile || {},
+  };
+
+  try {
+    const inserted = await dbAdapter.insert("users", newUser);
+    return { ok: true, status: 201, user: toSafeUser(inserted) };
+  } catch (err) {
+    return { ok: false, status: 500, error: err.message || "Server error creating user" };
+  }
+}
+
+// ------------------------------
+// POST /api/users/login
+// ------------------------------
+// Body: { username, password, role }
+// Response: { token, username, role }
+router.post("/login", loginLimiter, async (req, res) => {
+  const { username, password, role } = req.body;
+
+  if (!username || !password || !role) {
+    return res.status(400).json({ error: "username, password, and role are required" });
+  }
+
+  const lockoutState = getLockoutState(username);
+  if (lockoutState.locked) {
+    return res.status(423).json({
+      error: "Account temporarily locked due to repeated failed login attempts. Please try again later.",
+    });
+  }
+
+  try {
+    const users = await dbAdapter.list("users");
+    const user = users.find((u) => u.username === username);
+
+    // Same generic error for "no such user" and "wrong password" so a caller
+    // can't use this endpoint to enumerate valid usernames.
+    if (!user) {
+      recordFailedAttempt(username);
+      return res.status(401).json({ error: "Invalid username or password" });
+    }
+
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid) {
+      recordFailedAttempt(username);
+      return res.status(401).json({ error: "Invalid username or password" });
+    }
+
+    if (user.role !== role) {
+      recordFailedAttempt(username);
+      return res.status(401).json({ error: "Invalid username or password" });
+    }
+
+    clearFailedAttempts(username);
+
+    const token = jwt.sign(
+      {
+        username: user.username,
+        role: user.role,
+      },
+      JWT_SECRET,
+      { expiresIn: TOKEN_EXPIRES_IN }
+    );
+
+    res.json({ token, username: user.username, role: user.role });
+  } catch (err) {
+    console.error("Login failed:", err);
+    res.status(500).json({ error: "Server error during login" });
+  }
+});
+
+// ------------------------------
+// GET /api/users (Admin only)
+// ------------------------------
+router.get(
+  "/",
+  authenticateToken,
+  authorizeRole(["admin"]),
+  async (req, res) => {
+    try {
+      const { role } = req.query; // optional ?role=teacher|student|district|admin
+      const users = await dbAdapter.list("users");
+
+      let filtered = users;
+      if (role) {
+        filtered = users.filter((u) => u.role === role);
+      }
+
+      // Return essential fields only
+      const result = filtered.map((u) => ({
+        username: u.username,
+        role: u.role,
+        email: u.email,
+        profile: u.profile || {},
+        createdAt: u.createdAt,
+      }));
+
+      res.json(result);
+    } catch (err) {
+      console.error("Fetch users failed:", err);
+      res.status(500).json({ error: "Failed to load users" });
+    }
+  }
+);
+
+// ------------------------------
+// POST /api/users (Admin can create)
+// ------------------------------
+router.post(
+  "/",
+  authenticateToken,
+  authorizeRole(["admin"]),
+  async (req, res) => {
+    const result = await createUserRecord(req.body);
+    if (!result.ok) {
+      return res.status(result.status).json({ error: result.error });
+    }
+    res.status(result.status).json(result.user);
+  }
+);
+
+// ------------------------------
+// POST /api/users/bulk (Admin only)
+// body: { username, password, role, email?, profile? }[] -- each row
+// validated and inserted with the exact same rules as POST / above
+// (createUserRecord), including the username-uniqueness check against
+// users already in the DB *and* against earlier rows in this same batch
+// (since createUserRecord re-reads the live list each call).
+// ------------------------------
+router.post(
+  "/bulk",
+  authenticateToken,
+  authorizeRole(["admin"]),
+  async (req, res) => {
+    const rows = req.body;
+    if (!Array.isArray(rows)) {
+      return res.status(400).json({ error: "Request body must be a JSON array of users." });
+    }
+
+    const results = [];
+    for (let i = 0; i < rows.length; i++) {
+      const result = await createUserRecord(rows[i] || {});
+      results.push(
+        result.ok
+          ? { index: i, ok: true, username: result.user.username }
+          : { index: i, ok: false, error: result.error }
+      );
+    }
+
+    const created = results.filter((r) => r.ok).length;
+    res.status(207).json({ created, failed: results.length - created, results });
+  }
+);
+
+// ------------------------------
+// PUT /api/users/:username (Admin only)
+// Edits role/email/profile. Password changes go through the dedicated
+// reset-password endpoint below, not this one -- this route silently
+// ignores a `password` field in the body rather than accepting a raw,
+// unhashed password into a generic edit payload.
+// ------------------------------
+router.put(
+  "/:username",
+  authenticateToken,
+  authorizeRole(["admin"]),
+  async (req, res) => {
+    const { username } = req.params;
+    const { role, email, profile } = req.body || {};
+
+    try {
+      const users = await dbAdapter.list("users");
+      const target = users.find((u) => u.username === username);
+      if (!target) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      if (role !== undefined && !VALID_ROLES.includes(role)) {
+        return res.status(400).json({ error: `role must be one of: ${VALID_ROLES.join(", ")}` });
+      }
+
+      const updates = {};
+      if (role !== undefined) updates.role = role;
+      if (email !== undefined) updates.email = email;
+      if (profile !== undefined) updates.profile = profile;
+
+      const merged = { ...target, ...updates };
+      const { valid, errors } = validateEntity("users", merged);
+      if (!valid) {
+        return res.status(400).json({ error: "Schema validation failed", details: errors });
+      }
+
+      // Same username-keyed lookup as reset-password below, and for the
+      // same reason: seed accounts have no `id` to match on.
+      const updated = await dbAdapter.updateWhere("users", { username }, {
+        ...updates,
+        id: target.id || username,
+      });
+      if (!updated) {
+        return res.status(500).json({ error: "Failed to update user" });
+      }
+      res.json(toSafeUser(updated));
+    } catch (err) {
+      console.error("User update failed:", err);
+      res.status(500).json({ error: "Failed to update user" });
+    }
+  }
+);
+
+// ------------------------------
+// POST /api/users/:username/reset-password (Admin only)
+// Body: { newPassword? } -- if omitted, a random temporary password is
+// generated and returned once (same "show it to the admin once" pattern
+// account creation already uses).
+// ------------------------------
+router.post(
+  "/:username/reset-password",
+  authenticateToken,
+  authorizeRole(["admin"]),
+  async (req, res) => {
+    const { username } = req.params;
+    const { newPassword } = req.body || {};
+
+    try {
+      const users = await dbAdapter.list("users");
+      const target = users.find((u) => u.username === username);
+      if (!target) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const generated = !newPassword;
+      const passwordToSet = newPassword || generateTempPassword();
+      if (passwordToSet.length < 8) {
+        return res.status(400).json({ error: "Password must be at least 8 characters." });
+      }
+
+      const hashed = await bcrypt.hash(passwordToSet, 10);
+
+      // Match on { username }, not on the synthetic `id`. The four seed
+      // accounts (admin1/dist1/teach1/stud1) are created by initMongo.js
+      // (and server/users.json) without an `id` field, so the old
+      // update("users", target.id || username, ...) matched no document --
+      // in Mongo mode findOneAndUpdate returned null without throwing, so
+      // the endpoint reported success while the password was never
+      // actually changed. Backfilling `id` at the same time makes every
+      // later id-keyed lookup on that record work too.
+      const updated = await dbAdapter.updateWhere(
+        "users",
+        { username },
+        { password: hashed, id: target.id || username }
+      );
+      if (!updated) {
+        return res.status(500).json({ error: "Failed to reset password" });
+      }
+
+      res.json({
+        success: true,
+        username,
+        // Only present when the server generated it -- an admin-supplied
+        // password is never echoed back.
+        temporaryPassword: generated ? passwordToSet : undefined,
+      });
+    } catch (err) {
+      console.error("Password reset failed:", err);
+      res.status(500).json({ error: "Failed to reset password" });
+    }
+  }
+);
+
+// ------------------------------
+// DELETE /api/users/:username (Admin only)
+// ------------------------------
+router.delete(
+  "/:username",
+  authenticateToken,
+  authorizeRole(["admin"]),
+  async (req, res) => {
+    const { username } = req.params;
+
+    if (!username) {
+      return res.status(400).json({ error: "username is required" });
+    }
+
+    try {
+      const users = await dbAdapter.list("users");
+      const target = users.find((u) => u.username === username);
+      if (!target) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      // Username-keyed for the same reason as the two routes above --
+      // and because in JSON mode remove("users", undefined) matched every
+      // id-less record, i.e. deleting one seed account wiped them all.
+      await dbAdapter.removeWhere("users", { username });
+      res.json({ success: true, deleted: username });
+    } catch (err) {
+      console.error("User deletion failed:", err);
+      res.status(500).json({ error: "Failed to delete user" });
+    }
+  }
+);
+
+export default router;

@@ -1,0 +1,96 @@
+[
+  {
+    "name": "Evidence of Equivalent Fraction Recognition",
+    "description": "Evidence model for the claim that a student can recognize equivalent fractions represented in different forms.",
+    "competencyId": "<REPLACE_WITH_REAL_COMPETENCY_ID>",
+    "claimStatement": "The student can correctly identify fractions that are equivalent in value even when expressed with different numerators and denominators.",
+    "warrants": [
+      {
+        "id": "w1",
+        "reasoningStatement": "Correctly selecting the equivalent fraction from distractors requires recognizing that equivalent fractions represent the same point on the number line.",
+        "cognitiveAttribute": "Fraction equivalence reasoning",
+        "performanceCondition": "Presented with a target fraction and four answer options, no calculator allowed.",
+        "limitationClause": "Does not by itself establish fluency with mixed numbers or fraction operations."
+      }
+    ],
+    "observables": [
+      {
+        "id": "obs_equivalent_fractions",
+        "statement": "Student selects the fraction equivalent to the target fraction from a set of distractors.",
+        "type": "MCQ",
+        "warrantId": "w1",
+        "boundaryNote": "Distractors include common error patterns (e.g., doubling only the numerator).",
+        "evidenceRule": {
+          "direction": "supports",
+          "strengthLevel": 4,
+          "activationCondition": "Correct option selected on first attempt.",
+          "justification": "A correct first-attempt selection is strong evidence of equivalence understanding rather than guessing."
+        }
+      }
+    ],
+    "statisticalModels": [
+      {
+        "id": "sm1",
+        "type": "1PL",
+        "subtype": "logistic",
+        "structureConfig": { "dimensions": 1 },
+        "active": true,
+        "parameterSets": [],
+        "activeParameterSetId": null
+      }
+    ],
+    "decisionRule": {
+      "type": "mastery",
+      "threshold": 0.7,
+      "direction": "above",
+      "justification": "Threshold set from prior calibration study on the Grade 6 fractions item pool."
+    }
+  },
+  {
+    "name": "Evidence of Fraction Comparison",
+    "description": "Evidence model for the claim that a student can compare the relative size of two fractions.",
+    "competencyId": "<REPLACE_WITH_REAL_COMPETENCY_ID>",
+    "claimStatement": "The student can correctly determine which of two fractions represents a greater quantity.",
+    "warrants": [
+      {
+        "id": "w1",
+        "reasoningStatement": "Correctly ordering two fractions with unlike denominators requires converting to a common reference (common denominator or decimal equivalent).",
+        "cognitiveAttribute": "Fraction magnitude reasoning",
+        "performanceCondition": "Presented with two fractions with unlike denominators, no calculator allowed.",
+        "limitationClause": "Does not establish understanding of fraction equivalence in isolation."
+      }
+    ],
+    "observables": [
+      {
+        "id": "obs_fraction_comparison",
+        "statement": "Student correctly selects the larger of two given fractions.",
+        "type": "MCQ",
+        "warrantId": "w1",
+        "boundaryNote": "Fraction pairs are selected to avoid same-numerator or same-denominator shortcuts.",
+        "evidenceRule": {
+          "direction": "supports",
+          "strengthLevel": 3,
+          "activationCondition": "Correct option selected on first attempt.",
+          "justification": "Correct comparison under these constraints indicates genuine magnitude reasoning."
+        }
+      }
+    ],
+    "statisticalModels": [
+      {
+        "id": "sm1",
+        "type": "1PL",
+        "subtype": "logistic",
+        "structureConfig": { "dimensions": 1 },
+        "active": true,
+        "parameterSets": [],
+        "activeParameterSetId": null
+      }
+    ],
+    "decisionRule": {
+      "type": "mastery",
+      "threshold": 0.7,
+      "direction": "above",
+      "justification": "Threshold aligned with the equivalent-fractions evidence model for consistency across the construct."
+    }
+  }
+]

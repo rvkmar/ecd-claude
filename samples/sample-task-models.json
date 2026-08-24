@@ -1,0 +1,367 @@
+[
+  {
+    "name": "Equivalent Fractions — Bar Model Selection",
+    "description": "Presents a target fraction as a bar model alongside four candidate bars and asks the student to select the equivalent one.",
+    "designRationale": "A selected-response form keeps the response channel narrow so the observable is read cleanly, and lets the item be calibrated on the IRT scale the evidence model uses.",
+    "evidenceModelIds": [
+      "<EVIDENCE_MODEL_ID>"
+    ],
+    "primaryEvidenceModelId": "<EVIDENCE_MODEL_ID>",
+    "expectedObservations": [
+      {
+        "observationId": "<OBSERVABLE_ID_1>",
+        "evidenceModelId": "<EVIDENCE_MODEL_ID>",
+        "required": true,
+        "weight": 1
+      }
+    ],
+    "taskStructure": {
+      "presentationMode": "interactive",
+      "responseFormat": "selected",
+      "stimulusPolicy": "parameterized",
+      "timingConstraint": {
+        "timeLimitSeconds": 90,
+        "pacingPolicy": "examinee-paced"
+      },
+      "resourceConstraints": {
+        "maxAttempts": 1,
+        "toolsAllowed": "",
+        "collaborationAllowed": false
+      },
+      "administration": {
+        "environment": "online_supervised",
+        "assessor": "automated",
+        "supportLevel": "none",
+        "affectiveLoad": "low",
+        "socialExposure": "low"
+      }
+    },
+    "blueprintConstraints": {
+      "difficultyRange": {
+        "min": -2,
+        "max": 1.5
+      },
+      "cognitiveDemand": {
+        "bloomLevel": "apply",
+        "reasoningType": "procedural"
+      },
+      "domainAlignment": {
+        "subject": "Mathematics",
+        "gradeBand": "Grade 6"
+      },
+      "exposurePolicy": {
+        "maxUses": 500,
+        "cooldownPolicy": "form"
+      },
+      "allowedInteractionTypes": [
+        "mcq"
+      ],
+      "allowedScoringMethods": [
+        "dichotomous"
+      ]
+    },
+    "taskCompositionType": "atomic",
+    "subTaskIds": [],
+    "actions": [
+      "select",
+      "interpret"
+    ],
+    "fairnessRisks": [
+      {
+        "category": "linguistic",
+        "description": "Bar-model vocabulary may be unfamiliar to students taught with number lines only.",
+        "severity": "medium",
+        "mitigation": "A worked orientation screen precedes the first item of this type."
+      }
+    ],
+    "fairnessNotes": "Residual risk accepted: the orientation screen removes the vocabulary dependency without cueing the answer.",
+    "accessibilityAssumptions": {
+      "assistiveSupport": "Screen-reader compatible; no drag interactions.",
+      "languageLoad": "Reading demand below the Grade 6 band.",
+      "accommodations": "Extended time permitted.",
+      "sensoryMotorDemands": "Pointer or keyboard selection only."
+    },
+    "equivalenceGroupId": "equivalent-fractions-bar-v1"
+  },
+  {
+    "name": "Fraction Comparison — Justified Choice",
+    "description": "Presents two fractions, asks the student to choose the larger and then to justify the choice in a short constructed response.",
+    "designRationale": "Hybrid response is what lets one task carry both the comparison observable and the justification observable; splitting them into two tasks would double exposure for the same inference.",
+    "evidenceModelIds": [
+      "<EVIDENCE_MODEL_ID>"
+    ],
+    "primaryEvidenceModelId": "<EVIDENCE_MODEL_ID>",
+    "expectedObservations": [
+      {
+        "observationId": "<OBSERVABLE_ID_1>",
+        "evidenceModelId": "<EVIDENCE_MODEL_ID>",
+        "required": true,
+        "weight": 0.5
+      },
+      {
+        "observationId": "<OBSERVABLE_ID_2>",
+        "evidenceModelId": "<EVIDENCE_MODEL_ID>",
+        "required": true,
+        "weight": 0.3
+      },
+      {
+        "observationId": "<OBSERVABLE_ID_3>",
+        "evidenceModelId": "<EVIDENCE_MODEL_ID>",
+        "required": false,
+        "weight": 0.2
+      }
+    ],
+    "taskStructure": {
+      "presentationMode": "interactive",
+      "responseFormat": "hybrid",
+      "stimulusPolicy": "parameterized",
+      "timingConstraint": {
+        "timeLimitSeconds": 240,
+        "pacingPolicy": "examinee-paced, no backtracking"
+      },
+      "resourceConstraints": {
+        "maxAttempts": 1,
+        "toolsAllowed": "Scratch pad",
+        "collaborationAllowed": false
+      },
+      "administration": {
+        "environment": "classroom",
+        "assessor": "teacher",
+        "supportLevel": "limited",
+        "supportDescription": "Read-aloud of the prompt on request.",
+        "affectiveLoad": "low",
+        "socialExposure": "low"
+      }
+    },
+    "blueprintConstraints": {
+      "difficultyRange": {
+        "min": -1.5,
+        "max": 2
+      },
+      "cognitiveDemand": {
+        "bloomLevel": "analyze",
+        "reasoningType": "deductive"
+      },
+      "domainAlignment": {
+        "subject": "Mathematics",
+        "gradeBand": "Grade 6"
+      },
+      "exposurePolicy": {
+        "maxUses": 250,
+        "cooldownPolicy": "session"
+      },
+      "allowedInteractionTypes": [
+        "mcq",
+        "constructed"
+      ],
+      "allowedScoringMethods": [
+        "dichotomous",
+        "weighted_sum"
+      ]
+    },
+    "taskCompositionType": "atomic",
+    "subTaskIds": [],
+    "actions": [
+      "select",
+      "construct_response",
+      "interpret"
+    ],
+    "fairnessRisks": [
+      {
+        "category": "linguistic",
+        "description": "The justification is scored on mathematical reasoning but written in English, so writing fluency intrudes on the construct.",
+        "severity": "high",
+        "mitigation": "Rubric credits the reasoning chain only; spelling, grammar and length are explicitly out of scope."
+      },
+      {
+        "category": "accessibility",
+        "description": "Typed justification disadvantages students with motor impairments.",
+        "severity": "medium",
+        "mitigation": "Scribe and speech-to-text are both permitted accommodations."
+      }
+    ],
+    "fairnessNotes": "The high-severity linguistic risk is the reason this task is not used as the sole evidence for the comparison claim.",
+    "accessibilityAssumptions": {
+      "assistiveSupport": "Screen-reader compatible; speech-to-text permitted for the justification.",
+      "languageLoad": "Prompt below band; response language not scored.",
+      "accommodations": "Scribe, speech-to-text, extended time.",
+      "sensoryMotorDemands": "Typing or dictation."
+    },
+    "equivalenceGroupId": "fraction-comparison-justified-v1"
+  },
+  {
+    "name": "Mixed Number Conversion — Three-Part",
+    "description": "Three equally weighted conversions between improper fractions and mixed numbers, presented in one task.",
+    "designRationale": "The three conversions are interchangeable in difficulty, so an even allocation is the honest weighting; nothing justifies privileging one.",
+    "evidenceModelIds": [
+      "<EVIDENCE_MODEL_ID>"
+    ],
+    "primaryEvidenceModelId": "<EVIDENCE_MODEL_ID>",
+    "expectedObservations": [
+      {
+        "observationId": "<OBSERVABLE_ID_1>",
+        "evidenceModelId": "<EVIDENCE_MODEL_ID>",
+        "required": true,
+        "weight": 0.3333
+      },
+      {
+        "observationId": "<OBSERVABLE_ID_2>",
+        "evidenceModelId": "<EVIDENCE_MODEL_ID>",
+        "required": true,
+        "weight": 0.3333
+      },
+      {
+        "observationId": "<OBSERVABLE_ID_3>",
+        "evidenceModelId": "<EVIDENCE_MODEL_ID>",
+        "required": true,
+        "weight": 0.3334
+      }
+    ],
+    "taskStructure": {
+      "presentationMode": "interactive",
+      "responseFormat": "selected",
+      "stimulusPolicy": "generative",
+      "timingConstraint": {
+        "timeLimitSeconds": 180,
+        "pacingPolicy": "examinee-paced"
+      },
+      "resourceConstraints": {
+        "maxAttempts": 1,
+        "collaborationAllowed": false
+      },
+      "administration": {
+        "environment": "online_unsupervised",
+        "assessor": "automated",
+        "supportLevel": "none"
+      }
+    },
+    "blueprintConstraints": {
+      "difficultyRange": {
+        "min": -2.5,
+        "max": 1
+      },
+      "cognitiveDemand": {
+        "bloomLevel": "apply",
+        "reasoningType": "algorithmic"
+      },
+      "domainAlignment": {
+        "subject": "Mathematics",
+        "gradeBand": "Grade 6"
+      },
+      "exposurePolicy": {
+        "maxUses": 1000,
+        "cooldownPolicy": "daily"
+      },
+      "allowedInteractionTypes": [
+        "mcq",
+        "numeric"
+      ],
+      "allowedScoringMethods": [
+        "dichotomous"
+      ]
+    },
+    "taskCompositionType": "atomic",
+    "subTaskIds": [],
+    "actions": [
+      "select",
+      "record"
+    ],
+    "fairnessRisks": [],
+    "fairnessNotes": "",
+    "accessibilityAssumptions": {
+      "languageLoad": "Numeric stimulus, minimal reading demand."
+    },
+    "equivalenceGroupId": "mixed-number-conversion-v1"
+  },
+  {
+    "name": "Fractions Progress Check — Composite",
+    "description": "Runs the equivalence and comparison sub-tasks in sequence as a single administered unit.",
+    "designRationale": "Composite rather than two separate administrations so the two observables are collected under one set of timing and resource conditions.",
+    "evidenceModelIds": [
+      "<EVIDENCE_MODEL_ID>"
+    ],
+    "primaryEvidenceModelId": "<EVIDENCE_MODEL_ID>",
+    "expectedObservations": [
+      {
+        "observationId": "<OBSERVABLE_ID_1>",
+        "evidenceModelId": "<EVIDENCE_MODEL_ID>",
+        "required": true,
+        "weight": 0.6
+      },
+      {
+        "observationId": "<OBSERVABLE_ID_2>",
+        "evidenceModelId": "<EVIDENCE_MODEL_ID>",
+        "required": true,
+        "weight": 0.4
+      }
+    ],
+    "taskStructure": {
+      "presentationMode": "simulation",
+      "responseFormat": "hybrid",
+      "stimulusPolicy": "parameterized",
+      "timingConstraint": {
+        "timeLimitSeconds": 600,
+        "pacingPolicy": "section-timed"
+      },
+      "resourceConstraints": {
+        "maxAttempts": 1,
+        "toolsAllowed": "Fraction wall reference",
+        "collaborationAllowed": false
+      },
+      "administration": {
+        "environment": "laboratory",
+        "assessor": "teacher",
+        "supportLevel": "limited",
+        "affectiveLoad": "moderate",
+        "socialExposure": "moderate"
+      }
+    },
+    "blueprintConstraints": {
+      "difficultyRange": {
+        "min": -1,
+        "max": 2.5
+      },
+      "cognitiveDemand": {
+        "bloomLevel": "evaluate",
+        "reasoningType": "quantitative"
+      },
+      "domainAlignment": {
+        "subject": "Mathematics",
+        "gradeBand": "Grade 6"
+      },
+      "exposurePolicy": {
+        "maxUses": 100,
+        "cooldownPolicy": "form"
+      },
+      "allowedInteractionTypes": [
+        "mcq",
+        "numeric",
+        "constructed"
+      ],
+      "allowedScoringMethods": [
+        "weighted_sum"
+      ]
+    },
+    "taskCompositionType": "composite",
+    "subTaskIds": [
+      "<SUB_TASK_MODEL_ID>"
+    ],
+    "actions": [
+      "select",
+      "construct_response",
+      "analyze_data",
+      "record"
+    ],
+    "fairnessRisks": [
+      "Legacy plain-string risk, kept deliberately to exercise the upgrade path for records authored before fairness risks became structured objects."
+    ],
+    "fairnessNotes": "Longer administration raises fatigue as a construct-irrelevant factor; the section timer is generous for this reason.",
+    "accessibilityAssumptions": {
+      "assistiveSupport": "Screen-reader compatible throughout.",
+      "languageLoad": "Below band.",
+      "accommodations": "Extended time, rest breaks between sub-tasks.",
+      "sensoryMotorDemands": "Pointer or keyboard."
+    },
+    "equivalenceGroupId": "fractions-progress-check-v1"
+  }
+]

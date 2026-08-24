@@ -1,0 +1,137 @@
+[
+  {
+    "name": "NCF-SE 2023 — Mathematics, Middle Stage",
+    "description": "Illustrative sample modelled on the National Curriculum Framework for School Education 2023 structure (Curricular Goals → Competencies → Learning Outcomes). Replace the statements with the exact text of your own policy document before using it in production.",
+    "version": "2023",
+    "issuingBody": "NCERT",
+    "subject": "Mathematics",
+    "stage": "Middle Stage (Grades 6–8)",
+    "curricularGoals": [
+      {
+        "code": "CG-1",
+        "statement": "Understands numbers (whole numbers, integers, fractions, rational numbers), represents them, and performs operations on them fluently.",
+        "competencies": [
+          {
+            "code": "C-1.1",
+            "statement": "Represents rational numbers on the number line and compares and orders them.",
+            "learningOutcomes": [
+              "Locates positive and negative rational numbers on a number line.",
+              "Compares two rational numbers and justifies the comparison."
+            ]
+          },
+          {
+            "code": "C-1.2",
+            "statement": "Performs the four arithmetic operations on fractions and integers and applies them in context.",
+            "learningOutcomes": [
+              "Adds and subtracts fractions with unlike denominators.",
+              "Solves word problems requiring multiplication or division of fractions."
+            ]
+          }
+        ]
+      },
+      {
+        "code": "CG-2",
+        "statement": "Analyses patterns and represents relationships using variables, expressions, and simple equations.",
+        "competencies": [
+          {
+            "code": "C-2.1",
+            "statement": "Generalises a numerical or geometric pattern using a variable expression.",
+            "learningOutcomes": [
+              "Writes the nth term of a linear pattern as an algebraic expression.",
+              "Verifies a generalisation against specific cases of the pattern."
+            ]
+          },
+          {
+            "code": "C-2.2",
+            "statement": "Forms and solves linear equations in one variable arising from contextual situations.",
+            "learningOutcomes": [
+              "Translates a word problem into a linear equation in one variable.",
+              "Solves a linear equation and interprets the solution in context."
+            ]
+          }
+        ]
+      },
+      {
+        "code": "CG-3",
+        "statement": "Understands, describes, and reasons about shapes, their properties, and spatial relationships.",
+        "competencies": [
+          {
+            "code": "C-3.1",
+            "statement": "Classifies two-dimensional shapes by their properties and justifies the classification.",
+            "learningOutcomes": [
+              "Identifies quadrilaterals by side and angle properties.",
+              "Explains why a given figure does or does not belong to a class of shapes."
+            ]
+          },
+          {
+            "code": "C-3.2",
+            "statement": "Computes perimeter, area, and volume of standard figures and applies these in real contexts.",
+            "learningOutcomes": [
+              "Calculates the area of composite rectilinear figures.",
+              "Estimates and checks measurement results for reasonableness."
+            ]
+          }
+        ]
+      },
+      {
+        "code": "CG-4",
+        "statement": "Collects, organises, represents, and interprets data to answer questions and support claims.",
+        "competencies": [
+          {
+            "code": "C-4.1",
+            "statement": "Represents a data set using an appropriate graphical form and justifies the choice.",
+            "learningOutcomes": [
+              "Constructs bar graphs and pie charts from a given data set.",
+              "Explains why a chosen representation suits the question being asked."
+            ]
+          },
+          {
+            "code": "C-4.2",
+            "statement": "Interprets summary measures of a data set and draws defensible conclusions.",
+            "learningOutcomes": [
+              "Computes mean, median, and mode for a small data set.",
+              "Identifies a claim that the data does not support."
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "NCF-SE 2023 — Science, Middle Stage",
+    "description": "Illustrative sample of a second curriculum document, showing that several policies can coexist and be chosen independently in Competency Wizard Step 3.",
+    "version": "2023",
+    "issuingBody": "NCERT",
+    "subject": "Science",
+    "stage": "Middle Stage (Grades 6–8)",
+    "curricularGoals": [
+      {
+        "code": "CG-1",
+        "statement": "Understands matter, its states, and the changes it undergoes in everyday phenomena.",
+        "competencies": [
+          {
+            "code": "C-1.1",
+            "statement": "Distinguishes physical from chemical changes using observable evidence.",
+            "learningOutcomes": [
+              "Classifies everyday changes as physical or chemical and justifies the classification."
+            ]
+          }
+        ]
+      },
+      {
+        "code": "CG-2",
+        "statement": "Plans and carries out simple investigations and reasons from the evidence they produce.",
+        "competencies": [
+          {
+            "code": "C-2.1",
+            "statement": "Designs a fair test by identifying variables to change, measure, and hold constant.",
+            "learningOutcomes": [
+              "States a testable question and the variable being manipulated.",
+              "Explains why controlling a variable matters to the conclusion."
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]

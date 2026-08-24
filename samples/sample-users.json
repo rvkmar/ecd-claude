@@ -1,0 +1,63 @@
+[
+  {
+    "username": "jdoe",
+    "password": "TempPass!2026",
+    "role": "teacher",
+    "email": "jdoe@school.edu",
+    "profile": {
+      "designation": "Mathematics Teacher",
+      "subject": "Mathematics",
+      "emisId": "EMIS-100234",
+      "udiseId": "UDISE-33150200123",
+      "districtId": "DIST-CHN-01",
+      "state": "Tamil Nadu"
+    }
+  },
+  {
+    "username": "asharma",
+    "password": "TempPass!2026",
+    "role": "teacher",
+    "email": "asharma@school.edu",
+    "profile": {
+      "designation": "Science Teacher",
+      "subject": "Science",
+      "emisId": "EMIS-100235",
+      "udiseId": "UDISE-33150200124",
+      "districtId": "DIST-CHN-01",
+      "state": "Tamil Nadu"
+    }
+  },
+  {
+    "username": "rkumar.student",
+    "password": "TempPass!2026",
+    "role": "student",
+    "email": "",
+    "profile": {
+      "emisId": "EMIS-500987",
+      "apaarId": "APAAR-2026-004521",
+      "grade": "6",
+      "districtId": "DIST-CHN-01",
+      "state": "Tamil Nadu"
+    }
+  },
+  {
+    "username": "svenkat.district",
+    "password": "TempPass!2026",
+    "role": "district",
+    "email": "svenkat@education.tn.gov.in",
+    "profile": {
+      "designation": "District Education Officer",
+      "districtId": "DIST-CHN-01",
+      "state": "Tamil Nadu"
+    }
+  },
+  {
+    "username": "n.admin2",
+    "password": "TempPass!2026",
+    "role": "admin",
+    "email": "n.admin2@ecd-assessment.org",
+    "profile": {
+      "designation": "Assessment Program Administrator"
+    }
+  }
+]

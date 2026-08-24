@@ -1,0 +1,33 @@
+# version: "3.9"
+
+services:
+  node:
+    environment:
+      # 🔹 Enable development mode
+      - NODE_ENV=development
+      # 🔹 Change backend URL to point to local r-backend service
+      - R_BACKEND_URL=http://r-backend:4000
+    depends_on:
+      - r-backend
+    # ports:
+    #   # 🔹 Expose port 3000 to host for local development
+    #   - "3000:3000"
+    # volumes:
+    #   # 🔹 Mount current directory to /app in container for live code updates
+    #   - ./:/app
+    #   - ecd_data:/data
+    # command: sh -c "npm install && npm run dev"
+  r-backend:
+    image: rvkmar/r-backend:latest
+    container_name: r-backend
+    ports:
+      - "4000:4000"
+    restart: always
+    volumes:
+      - ./r-backend/app:/home/app
+    command: sh /home/app/dev-start.sh
+
+  nginx:
+    ports:
+      # 🔹 Change host port to 8081 for local development
+      - "8081:80"

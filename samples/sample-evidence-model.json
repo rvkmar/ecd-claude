@@ -1,0 +1,84 @@
+[
+  {
+    "name": "Numerical Reasoning Evidence Model",
+    "description": "Evidence model for the Numerical Reasoning competency: multi-step arithmetic problem solving and proportional reasoning.",
+    "competencyId": "c1787410836277_1_0",
+    "claimStatement": "The student can apply correct arithmetic operations and proportional reasoning to solve multi-step numeric problems.",
+    "warrants": [
+      {
+        "id": "w1",
+        "reasoningStatement": "Correctly computing a multi-step arithmetic problem requires selecting and sequencing the right operations in the right order.",
+        "cognitiveAttribute": "arithmetic_operation_sequencing",
+        "performanceCondition": "Given a multi-step word problem with two or more required operations and no calculator.",
+        "limitationClause": "Does not by itself demonstrate understanding of proportional or ratio-based reasoning."
+      },
+      {
+        "id": "w2",
+        "reasoningStatement": "Correctly identifying the proportional relationship between given quantities requires understanding ratio equivalence.",
+        "cognitiveAttribute": "proportional_reasoning",
+        "performanceCondition": "Given a word problem describing two or more quantities in a fixed ratio.",
+        "limitationClause": "Does not by itself demonstrate multi-step arithmetic sequencing ability."
+      }
+    ],
+    "observables": [
+      {
+        "id": "o1",
+        "statement": "The learner computes the correct final numeric answer to a multi-step arithmetic word problem within the given constraints.",
+        "type": "numeric_response",
+        "warrantId": "w1"
+      },
+      {
+        "id": "o2",
+        "statement": "The learner shows correct sequential working steps culminating in the right order of operations.",
+        "type": "constructed_response",
+        "warrantId": "w1"
+      },
+      {
+        "id": "o3",
+        "statement": "The learner selects the proportional relationship that correctly represents the quantities described in the problem.",
+        "type": "selected_response",
+        "warrantId": "w2"
+      }
+    ],
+    "evidenceRules": [
+      {
+        "id": "er_o1",
+        "observableId": "o1",
+        "direction": "supports",
+        "strengthLevel": 4,
+        "activationCondition": "Final numeric answer matches the expected value within rounding tolerance.",
+        "justification": "A correct final answer to a multi-step problem is strong direct evidence of correct arithmetic operation sequencing."
+      },
+      {
+        "id": "er_o2",
+        "observableId": "o2",
+        "direction": "supports",
+        "strengthLevel": 3,
+        "activationCondition": "Working steps show operations applied in the correct order.",
+        "justification": "Correctly ordered working steps provide converging process evidence alongside the final answer, even if the final answer has a minor slip."
+      },
+      {
+        "id": "er_o3",
+        "observableId": "o3",
+        "direction": "supports",
+        "strengthLevel": 3,
+        "activationCondition": "Selected option matches the correct proportional relationship.",
+        "justification": "Correct selection demonstrates recognition of ratio equivalence independent of computation ability."
+      }
+    ],
+    "statisticalModels": [
+      {
+        "id": "sm1",
+        "type": "irt",
+        "active": true,
+        "structureConfig": {
+          "observableIds": ["o1", "o2", "o3"],
+          "dimensions": 1,
+          "prior": { "mean": 0, "sd": 1 }
+        },
+        "parameterSets": [],
+        "activeParameterSetId": null
+      }
+    ]
+  }
+]
