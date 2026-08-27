@@ -41,7 +41,7 @@ const genId = (prefix = "em") => `${prefix}${Date.now()}`;
 
 const CALIBRATION_STATUSES = ["confirmed", "suspended"];
 
-function calibrationGate(model, action) {
+export function calibrationGate(model, action) {
 
   if (!model.locked) {
     return `${action} is allowed only after the evidence model is confirmed.`;
