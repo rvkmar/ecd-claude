@@ -1,6 +1,6 @@
 // server/routes/api/tasksRoutes.js
 import express from "express";
-import { authenticateToken } from "../utils/authMiddleware.js";
+import { authenticateToken, authorizeRole } from "../utils/authMiddleware.js";
 import { loadDB, saveDB } from "../../src/utils/db-server.js";
 import { validateEntity } from "../../src/utils/schema.js";
 
@@ -10,6 +10,13 @@ const router = express.Router();
 // (Previously this file had no auth check at all — added as part of the
 // Phase 1 security hardening pass; see AUTH_SECURITY_FIXES.md.)
 router.use(authenticateToken);
+
+// Every write route also needs a role gate: this file had none at all.
+// src/config/rolePermissions.js declares tasks editing/creation as
+// admin+district+teacher (canEdit/canCreate), but deletion only as
+// admin+district -- a teacher can create local tasks but not delete them.
+const canAuthor = authorizeRole(["admin", "district", "teacher"]);
+const canDelete = authorizeRole(["admin", "district"]);
 
 // ------------------------------
 // GET /api/tasks
@@ -33,7 +40,7 @@ router.get("/:id", (req, res) => {
 // POST /api/tasks
 // ------------------------------
 // body: { taskModelId, questionId? }
-router.post("/", (req, res) => {
+router.post("/", canAuthor, (req, res) => {
   const db = loadDB();
   const { taskModelId, questionId } = req.body;
 
@@ -75,7 +82,7 @@ router.post("/", (req, res) => {
 // ------------------------------
 // PUT /api/tasks/:id
 // ------------------------------
-router.put("/:id", (req, res) => {
+router.put("/:id", canAuthor, (req, res) => {
   const db = loadDB();
   const idx = db.tasks.findIndex(t => t.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: "Task not found" });
@@ -108,7 +115,7 @@ router.put("/:id", (req, res) => {
 // ------------------------------
 // DELETE /api/tasks/:id
 // ------------------------------
-router.delete("/:id", (req, res) => {
+router.delete("/:id", canDelete, (req, res) => {
   const db = loadDB();
   const before = db.tasks.length;
   db.tasks = db.tasks.filter(t => t.id !== req.params.id);

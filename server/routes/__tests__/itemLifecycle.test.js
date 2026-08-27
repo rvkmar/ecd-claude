@@ -485,7 +485,7 @@ describe("PATCH /api/items/:id/lifecycle", () => {
       makeDB({
         items: [makeItem({ status: "operational", locked: true })],
         tasks: [{ id: "t1", taskModelId: "tm1" }],
-        sessions: [{ id: "s1", taskIds: ["t1"], status: "in-progress", responses: [] }],
+        sessions: [{ id: "s1", taskIds: ["t1"], status: "in_progress", responses: [] }],
       })
     );
 
@@ -499,7 +499,7 @@ describe("PATCH /api/items/:id/lifecycle", () => {
       makeDB({
         items: [makeItem({ status: "operational", locked: true })],
         tasks: [{ id: "t1", taskModelId: "tm1" }],
-        sessions: [{ id: "s1", taskIds: ["t1"], status: "in-progress", responses: [] }],
+        sessions: [{ id: "s1", taskIds: ["t1"], status: "in_progress", responses: [] }],
       })
     );
 

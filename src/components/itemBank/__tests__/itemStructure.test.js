@@ -525,13 +525,18 @@ describe("toolsAllowedList (P0-1: white-screen crash)", () => {
   // render and unmounted the entire admin console to a blank page. It
   // looked intermittent because only a Task Model that actually named a
   // tool triggered it.
-  it("accepts every shape the two editors have written", () => {
+  //
+  // The array is now the only shape: the Day 10 migration
+  // (002-normalize-tools-allowed.js) rewrote every on-disk string to an
+  // array, so the reader no longer parses comma-separated strings -- a
+  // leftover string is treated as unrecognized, not re-parsed.
+  it("reads the array shape", () => {
     expect(toolsAllowedList({ toolsAllowed: ["a", "b"] })).toEqual(["a", "b"]);
-    expect(toolsAllowedList({ toolsAllowed: "Scratch pad" })).toEqual(["Scratch pad"]);
-    expect(toolsAllowedList({ toolsAllowed: "a, b ,c" })).toEqual(["a", "b", "c"]);
+    expect(toolsAllowedList({ toolsAllowed: [" a ", "", "b"] })).toEqual(["a", "b"]);
   });
 
-  it("returns an empty list for the shapes that never crashed either", () => {
+  it("returns an empty list for anything that isn't an array", () => {
+    expect(toolsAllowedList({ toolsAllowed: "Scratch pad" })).toEqual([]);
     expect(toolsAllowedList({ toolsAllowed: "" })).toEqual([]);
     expect(toolsAllowedList({})).toEqual([]);
     expect(toolsAllowedList(undefined)).toEqual([]);

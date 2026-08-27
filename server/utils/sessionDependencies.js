@@ -8,28 +8,9 @@
 // the existing auto-finish sweep.
 // ------------------------------------------------------------
 
-/* ------------------------------------------------------------
- SESSION STATUS VOCABULARY
+import { SESSION_STATUS, LIVE_SESSION_STATUSES } from "../../src/utils/sessionStatus.js";
 
- The codebase writes this field two different ways and always has:
- server/routes/sessionRoutes.js creates sessions as "in-progress"
- (hyphen), while server/utils/autoFinish.js and src/utils/schema.js both
- test for "in_progress" (underscore). SessionPlayer.jsx uses both.
-
- Neither spelling is wrong here yet -- picking one is a data migration,
- not a code change, and doing it inside a lifecycle feature would be a
- silent behaviour change to session handling. So this module matches BOTH
- and is deliberately loud about why. Anything that decides whether a
- student's session is still running MUST match both until that is
- reconciled; matching one spelling would make this gate pass for exactly
- the sessions the other half of the app considers live.
------------------------------------------------------------- */
-export const LIVE_SESSION_STATUSES = [
-  "in-progress",
-  "in_progress",
-  "reopened",
-  "paused",
-];
+export { LIVE_SESSION_STATUSES };
 
 /* A paused session counts as LIVE. Pausing is a break, not an ending --
    POST /api/sessions/:id/resume puts it straight back into delivery, so
@@ -39,7 +20,7 @@ export function isLiveSession(session) {
   if (!session) return false;
   if (session.isCompleted) return false;
 
-  const status = session.status || "in-progress";
+  const status = session.status || SESSION_STATUS.IN_PROGRESS;
   return LIVE_SESSION_STATUSES.includes(status);
 }
 

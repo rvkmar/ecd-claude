@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "migrate": "node server/migrations/run.js",
+    "migrate:dry-run": "node server/migrations/run.js --dry-run"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

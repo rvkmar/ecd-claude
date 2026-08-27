@@ -46,6 +46,7 @@ import {
 import { validateItemLifecycle } from "../utils/lifecycleValidation.js";
 import { canTransition, TRANSITIONS } from "../utils/lifecycleMatrix.js";
 import { liveSessionsForItem } from "../utils/sessionDependencies.js";
+import { SESSION_STATUS } from "../../src/utils/sessionStatus.js";
 
 const router = express.Router();
 
@@ -628,7 +629,7 @@ router.get("/:id/dependents", (req, res) => {
     liveSessions: live.map((s) => ({
       id: s.id,
       studentId: s.studentId ?? null,
-      status: s.status ?? "in-progress",
+      status: s.status ?? SESSION_STATUS.IN_PROGRESS,
     })),
   });
 });

@@ -5,7 +5,6 @@ import Modal from "../ui/Modal";
 import {
     useEvidenceModels,
     useDeleteEvidenceModel,
-    useConfirmEvidenceModel,
     useCloneEvidenceModel,
 } from "@/api/queries/evidenceModels";
 import { useCompetencies, useCompetencyModels } from "@/api/queries/competencies";
@@ -30,11 +29,6 @@ export default function EvidenceModelList({
         model: null,
     });
 
-    const [confirmModal, setConfirmModal] = useState({
-        open: false,
-        model: null,
-    });
-
     /* =====================================================
        Load Evidence + Competency Metadata (shared caches)
     ===================================================== */
@@ -44,7 +38,6 @@ export default function EvidenceModelList({
     const { data: competencyModels = [] } = useCompetencyModels();
 
     const deleteEvidenceModel = useDeleteEvidenceModel();
-    const confirmEvidenceModel = useConfirmEvidenceModel();
     const cloneEvidenceModel = useCloneEvidenceModel();
 
     /* =====================================================
@@ -96,21 +89,6 @@ export default function EvidenceModelList({
         });
 
         setDeleteModal({ open: false, model: null });
-    };
-
-    /* =====================================================
-       Confirm (draft → confirmed)
-    ===================================================== */
-
-    const confirmModel = () => {
-
-        if (!confirmModal.model) return;
-
-        confirmEvidenceModel.mutate(confirmModal.model.id, {
-            onSuccess: (result) => onPromote?.(result),
-        });
-
-        setConfirmModal({ open: false, model: null });
     };
 
     /* =====================================================
@@ -303,18 +281,6 @@ export default function EvidenceModelList({
                                                     {openActionLabel(m)}
                                                 </button>
 
-                                                {/* <button
-                                                    onClick={() =>
-                                                        setConfirmModal({
-                                                            open: true,
-                                                            model: m,
-                                                        })
-                                                    }
-                                                    className="bg-green-600 text-white px-3 py-1 rounded"
-                                                >
-                                                    Confirm
-                                                </button> */}
-
                                                 <button
                                                     onClick={() =>
                                                         setDeleteModal({
@@ -374,17 +340,6 @@ export default function EvidenceModelList({
                 confirmClass="bg-red-600 text-white"
             />
 
-            {/* ---------------- Confirm Modal ---------------- */}
-            {/* <Modal
-                isOpen={confirmModal.open}
-                onClose={() =>
-                    setConfirmModal({ open: false, model: null })
-                }
-                onConfirm={confirmModel}
-                title="Confirm Evidence Model"
-                message="This will lock the structure and enforce governance. Continue?"
-                confirmClass="bg-green-600 text-white"
-            /> */}
         </div>
     );
 }

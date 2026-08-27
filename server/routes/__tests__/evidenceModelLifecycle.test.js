@@ -23,6 +23,10 @@ vi.mock("../../utils/authMiddleware.js", () => ({
     req.user = { id: "u1", role: "admin" };
     next();
   },
+  authorizeRole: (roles) => (req, res, next) => {
+    if (!req.user || !roles.includes(req.user.role)) return res.sendStatus(403);
+    next();
+  },
 }));
 
 vi.mock("../../../src/utils/db-server.js", () => ({

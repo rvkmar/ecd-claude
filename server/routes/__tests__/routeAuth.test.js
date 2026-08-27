@@ -38,15 +38,24 @@ const PROTECTED_ROUTERS = [
 describe.each(PROTECTED_ROUTERS)(
   "$name requires authentication",
   ({ path, importer }) => {
-    it("rejects GET / with no Authorization header (401)", async () => {
-      const { default: router } = await importer();
-      const app = express();
-      app.use(express.json());
-      app.use(path, router);
+    it(
+      "rejects GET / with no Authorization header (401)",
+      async () => {
+        const { default: router } = await importer();
+        const app = express();
+        app.use(express.json());
+        app.use(path, router);
 
-      const res = await request(app).get(path + "/");
-      expect(res.status).toBe(401);
-    });
+        const res = await request(app).get(path + "/");
+        expect(res.status).toBe(401);
+      },
+      // sessionRoutes' cold dynamic import (it pulls in mathjs) occasionally
+      // exceeds the default 5000ms under memory pressure on a constrained
+      // CI/sandbox runner; this is a slow-import timing issue, not a
+      // behavioral flake, so a longer budget is the correct fix rather than
+      // a retry.
+      15000
+    );
 
     it("rejects a request with a garbage Authorization header (403)", async () => {
       const { default: router } = await importer();

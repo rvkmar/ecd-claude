@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import Modal from "../ui/Modal";
+import { SESSION_STATUS } from "@/utils/sessionStatus";
 
 // SessionList.jsx
 // Presentational list for sessions. Receives `sessions` and optional `students`.
@@ -161,7 +162,7 @@ export default function SessionList({
           </div>
 
           <div className="flex flex-col space-y-2 w-1/4 items-end">
-            {s.status === "in-progress" && (
+            {s.status === SESSION_STATUS.IN_PROGRESS && (
               <>
                 <button
                   onClick={() => onPlay(s)}

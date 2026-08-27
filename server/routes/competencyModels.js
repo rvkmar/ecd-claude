@@ -4,7 +4,7 @@
 // With Full Cross‑Layer Referential Protection (Competency ↔ Evidence)
 
 import express from "express";
-import { authenticateToken } from "../utils/authMiddleware.js";
+import { authenticateToken, authorizeRole } from "../utils/authMiddleware.js";
 import { loadDB, saveDB } from "../../src/utils/db-server.js";
 import { validateEntity } from "../../src/utils/schema.js";
 import { canTransition } from "../utils/lifecycleMatrix.js";
@@ -15,6 +15,14 @@ const router = express.Router();
 // (Previously this file had no auth check at all — added as part of the
 // Phase 1 security hardening pass; see AUTH_SECURITY_FIXES.md.)
 router.use(authenticateToken);
+
+// Every write route also needs a role gate: this file had none at all,
+// while src/config/rolePermissions.js already declared competencyModels
+// editing as admin-only (canEdit/canDelete). Any authenticated caller,
+// including a student, could otherwise create/edit/confirm/delete a
+// Competency Model. Matches itemsRoutes.js's canAuthor pattern.
+const canAuthor = authorizeRole(["admin"]);
+
 const genId = (prefix = "cm") => `${prefix}${Date.now()}`;
 
 /* =====================================================
@@ -108,7 +116,7 @@ function createCompetencyRecord(payload = {}, db, modelId, idSuffix = "") {
 /* =====================================================
    🔹 CREATE MODEL (DRAFT ONLY)
 ===================================================== */
-router.post("/models", (req, res) => {
+router.post("/models", canAuthor, (req, res) => {
   const db = loadDB();
   const result = createCompetencyModelRecord(req.body || {}, db);
   if (!result.ok) return res.status(result.status).json({ errors: result.details || [result.error] });
@@ -129,7 +137,7 @@ router.post("/models", (req, res) => {
    at /models/:id/confirm. A competency that fails validation is reported
    per-item without failing the parent model row.
 ===================================================== */
-router.post("/models/bulk", (req, res) => {
+router.post("/models/bulk", canAuthor, (req, res) => {
   const rows = req.body;
   if (!Array.isArray(rows)) {
     return res.status(400).json({ error: "Request body must be a JSON array of competency models." });
@@ -176,7 +184,7 @@ router.post("/models/bulk", (req, res) => {
 /* =====================================================
    🔹 UPDATE MODEL (DRAFT ONLY)
 ===================================================== */
-router.put("/models/:id", (req, res) => {
+router.put("/models/:id", canAuthor, (req, res) => {
   const db = loadDB();
   const { id } = req.params;
 
@@ -216,7 +224,7 @@ router.put("/models/:id", (req, res) => {
 /* =====================================================
    🔹 CONFIRM MODEL (STRICT STRUCTURAL VALIDATION)
 ===================================================== */
-router.post("/models/:id/confirm", (req, res) => {
+router.post("/models/:id/confirm", canAuthor, (req, res) => {
   const db = loadDB();
   const model = db.competencyModels?.find(m => m.id === req.params.id);
 
@@ -279,7 +287,7 @@ router.post("/models/:id/confirm", (req, res) => {
    strict per-competency validation, and a second, weaker path to
    confirmed is exactly what the review gate exists to prevent.
 ===================================================== */
-router.patch("/models/:id/lifecycle", (req, res) => {
+router.patch("/models/:id/lifecycle", canAuthor, (req, res) => {
   const db = loadDB();
   const model = db.competencyModels?.find(m => m.id === req.params.id);
 
@@ -324,7 +332,7 @@ router.patch("/models/:id/lifecycle", (req, res) => {
 /* =====================================================
    🔹 CLONE MODEL (STRUCTURAL VERSIONING)
 ===================================================== */
-router.post("/models/:id/clone", (req, res) => {
+router.post("/models/:id/clone", canAuthor, (req, res) => {
   const db = loadDB();
   const original = db.competencyModels?.find(m => m.id === req.params.id);
 
@@ -392,7 +400,7 @@ router.post("/models/:id/clone", (req, res) => {
 /* =====================================================
    🔹 DELETE MODEL (DRAFT ONLY + REFERENTIAL PROTECTION)
 ===================================================== */
-router.delete("/models/:id", (req, res) => {
+router.delete("/models/:id", canAuthor, (req, res) => {
   const db = loadDB();
   const model = db.competencyModels?.find(m => m.id === req.params.id);
 
@@ -425,7 +433,7 @@ router.delete("/models/:id", (req, res) => {
 /* =====================================================
    🔹 COMPETENCY CRUD (DRAFT ONLY + CROSS‑LAYER SAFETY)
 ===================================================== */
-router.post("/", (req, res) => {
+router.post("/", canAuthor, (req, res) => {
   const db = loadDB();
   const payload = req.body;
 
@@ -445,7 +453,7 @@ router.post("/", (req, res) => {
   res.status(result.status).json(result.record);
 });
 
-router.put("/:id", (req, res) => {
+router.put("/:id", canAuthor, (req, res) => {
   const db = loadDB();
   const idx = db.competencies?.findIndex(c => c.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: "Competency not found" });
@@ -475,7 +483,7 @@ router.put("/:id", (req, res) => {
   res.json(updated);
 });
 
-router.delete("/:id", (req, res) => {
+router.delete("/:id", canAuthor, (req, res) => {
   const db = loadDB();
   const comp = db.competencies?.find(c => c.id === req.params.id);
   if (!comp) return res.status(404).json({ error: "Not found" });

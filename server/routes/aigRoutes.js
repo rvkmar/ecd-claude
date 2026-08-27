@@ -1,12 +1,20 @@
 // server/routes/api/aigRoutes.js
 // 🔹 ECD-Compliant AIG Item Generator
+//
+// Not currently mounted in server/index.js (see server/aig/index.js's
+// header note -- AIG is shelved until Step 18). Gated anyway, same
+// reasoning as autoFinishRoutes.js: an unmounted, ungated write route is
+// a landmine for whoever re-enables it without re-auditing first.
 
 import express from "express";
+import { authenticateToken, authorizeRole } from "../utils/authMiddleware.js";
 import { loadDB, saveDB } from "../../src/utils/db-server.js";
 import { validateEntity, isLinkableEvidenceModel } from "../../src/utils/schema.js";
 import { generateFromModel } from "../aig/generateFromModel.js";
 
 const router = express.Router();
+router.use(authenticateToken);
+const canAuthor = authorizeRole(["admin", "district"]);
 const genId = (prefix = "it") => `${prefix}${Date.now()}`;
 
 /* =====================================================
@@ -21,7 +29,7 @@ const genId = (prefix = "it") => `${prefix}${Date.now()}`;
    }
 ===================================================== */
 
-router.post("/generate", (req, res) => {
+router.post("/generate", canAuthor, (req, res) => {
 
   const {
     evidenceModelId,

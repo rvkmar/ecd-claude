@@ -1,7 +1,8 @@
 import express from "express";
-import { authenticateToken } from "../utils/authMiddleware.js";
+import { authenticateToken, authorizeRole } from "../utils/authMiddleware.js";
 import { loadDB, saveDB, finishSession } from "../../src/utils/db-server.js";
 import { validateEntity } from "../../src/utils/schema.js";
+import { SESSION_STATUS } from "../../src/utils/sessionStatus.js";
 import { log2 } from "mathjs"; // if not available, define inline
 
 function entropy(p) {
@@ -15,6 +16,15 @@ const router = express.Router();
 // (Previously this file had no auth check at all — added as part of the
 // Phase 1 security hardening pass; see AUTH_SECURITY_FIXES.md.)
 router.use(authenticateToken);
+
+// Most routes below are deliberately left open to any authenticated
+// role: creating, submitting, pausing and finishing a session is a
+// student's own self-service flow, not a privileged action, and
+// rolePermissions.js has no per-role session ownership model to gate
+// against yet (that's a real gap, but a scope-based one, not a role-list
+// one -- see the RBAC sweep notes). DELETE is the one exception: it was
+// already commented "For admin use only" but never enforced.
+const adminOnly = authorizeRole(["admin"]);
 
 const R_BACKEND = process.env.R_BACKEND_URL || "http://localhost:4000";
 
@@ -78,7 +88,7 @@ router.post("/", (req, res) => {
     nextTaskPolicy: policyConfig,
 
     // Lifecycle
-    status: "in-progress",
+    status: SESSION_STATUS.IN_PROGRESS,
     isCompleted: false,
     startedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -414,11 +424,11 @@ router.post("/:id/resume", (req, res) => {
   const idx = db.sessions.findIndex((s) => s.id === id);
   if (idx === -1) return res.status(404).json({ error: "Session not found" });
 
-  if (db.sessions[idx].status !== "paused") {
+  if (db.sessions[idx].status !== SESSION_STATUS.PAUSED) {
     return res.status(400).json({ error: "Session is not paused" });
   }
 
-  db.sessions[idx].status = "in-progress";
+  db.sessions[idx].status = SESSION_STATUS.IN_PROGRESS;
   db.sessions[idx].updatedAt = new Date().toISOString();
   saveDB(db);
   res.json(db.sessions[idx]);
@@ -483,7 +493,7 @@ router.post("/:id/archive", (req, res) => {
 // DELETE /api/sessions/:id
 // ------------------------------
 // For admin use only
-router.delete("/:id", (req, res) => {
+router.delete("/:id", adminOnly, (req, res) => {
   const { id } = req.params;
   const db = loadDB();
   if (!db.sessions) db.sessions = [];

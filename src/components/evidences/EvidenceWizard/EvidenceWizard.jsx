@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import WizardSidebar from "./WizardSidebar";
 import WizardStepContainer from "./WizardStepContainer";
+import ErrorBoundary from "@/components/ui/ErrorBoundary";
 import { apiFetch, apiErrorMessage } from "@/api/apiClient";
 import { useAuth } from "@/auth/AuthProvider";
 import { evidenceModelsKey, evidenceModelKey } from "@/api/queries/evidenceModels";
@@ -144,6 +145,34 @@ export default function EvidenceWizard({ onCancel, onSaved, readOnly = false }) 
   };
 
   /* ==========================================================
+     RETURN TO DRAFT (REVIEWER REJECTION)
+     The reviewed -> draft transition the lifecycle matrix has always
+     declared, with no control anywhere in the product to reach it.
+  ========================================================== */
+  const handleReturnToDraft = async () => {
+    if (!draftModel.id) return;
+
+    try {
+      const data = await apiFetch(
+        `/api/evidenceModels/${draftModel.id}/lifecycle`,
+        { method: "PATCH", body: JSON.stringify({ nextStatus: "draft" }) },
+        auth
+      );
+
+      setDraftModel(data);
+      setLastSavedSnapshot(JSON.stringify(data));
+
+      queryClient.invalidateQueries({ queryKey: evidenceModelsKey });
+      queryClient.invalidateQueries({ queryKey: evidenceModelKey(draftModel.id) });
+
+      toast.success("Evidence Model returned to draft.");
+    } catch (err) {
+      console.error("Return to draft error", err);
+      toast.error(apiErrorMessage(err, "Could not return model to draft."));
+    }
+  };
+
+  /* ==========================================================
      CONFIRM (EXIT WIZARD)
   ========================================================== */
   const handleConfirm = async () => {
@@ -258,14 +287,20 @@ export default function EvidenceWizard({ onCancel, onSaved, readOnly = false }) 
         onSaveDraft={saveDraft}
         onSaveAndReview={handleSaveAndReview}
         onConfirm={handleConfirm}
+        onReturnToDraft={handleReturnToDraft}
       >
-        <CurrentStepComponent
-          locked={isLocked}
-          onValidityChange={handleValidityChange}
-          {...(isConfirmationStep
-            ? { confirmationChecked, setConfirmationChecked }
-            : {})}
-        />
+        <ErrorBoundary
+          resetKey={currentStepIndex}
+          label={STEPS[currentStepIndex]?.label}
+        >
+          <CurrentStepComponent
+            locked={isLocked}
+            onValidityChange={handleValidityChange}
+            {...(isConfirmationStep
+              ? { confirmationChecked, setConfirmationChecked }
+              : {})}
+          />
+        </ErrorBoundary>
       </WizardStepContainer>
     </div>
   );

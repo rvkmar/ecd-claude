@@ -25,6 +25,10 @@ import {
   responsePatternIsSpecified,
 } from "./ecdVocabulary.js";
 
+// Canonical session status spellings -- see src/utils/sessionStatus.js for
+// why "in_progress" (underscore) is the one, not "in-progress".
+import { SESSION_STATUS } from "./sessionStatus.js";
+
 export const schema = {
 
   // 🔹 Item Bank (ECD-Compliant)
@@ -514,39 +518,25 @@ export const INSTANTIABLE_TASK_MODEL_STATUSES = [
 /* ------------------------------------------------------------
    taskStructure.resourceConstraints.toolsAllowed
 
-   Two components disagreed about this field's type and nothing declared
-   one: `schema.js` says `resourceConstraints: 'object'` and stops there.
-   The Task Model editor (Step4TaskStructure) wrote a comma-separated
-   FREE-TEXT STRING; the Item Wizard read it as a `string[]` and called
-   `.join()` on it. The guard in front of that call was `?.length`, which
-   is truthy for a non-empty string -- so a Task Model with no tools ("")
-   or with the field absent both passed harmlessly, and one with
-   "Scratch pad" threw
+   Two components used to disagree about this field's type: the Task
+   Model editor (Step4TaskStructure) wrote a comma-separated FREE-TEXT
+   STRING while the Item Wizard read it as a `string[]` and called
+   `.join()` on it, unmounting the whole admin console to a blank page
+   for any Task Model that actually named a tool.
 
-       TypeError: ...toolsAllowed.join is not a function
-
-   out of a render, unmounting the whole admin console to a blank page.
-   It looked intermittent because it depended on which Task Model was
-   bound.
-
-   The list is the real type -- consumers want to enumerate the tools --
-   so the Task Model editor now writes an array. This reader stays
-   tolerant because records already on disk hold strings, and a
-   type-normalising migration is not something to run from inside a UI
-   fix. Every consumer must read through here rather than touching the
-   field directly.
+   The array is the real type. The Task Model editor has written arrays
+   since that fix, and server/migrations/migrations/002-normalize-tools-allowed.js
+   rewrote every remaining comma-separated string on disk, so this reader
+   no longer needs to tolerate both shapes -- every consumer still reads
+   through here rather than touching the field directly, in case a future
+   record ever fails to normalize.
 ------------------------------------------------------------ */
 export function toolsAllowedList(resourceConstraints) {
   const raw = resourceConstraints?.toolsAllowed;
 
-  if (Array.isArray(raw)) {
-    return raw.map((t) => String(t ?? "").trim()).filter(Boolean);
-  }
+  if (!Array.isArray(raw)) return [];
 
-  return String(raw ?? "")
-    .split(",")
-    .map((t) => t.trim())
-    .filter(Boolean);
+  return raw.map((t) => String(t ?? "").trim()).filter(Boolean);
 }
 
 export function isInstantiableTaskModel(tm) {
@@ -2074,7 +2064,7 @@ export function validateEntity(collection, obj, db = null, options = {}) {
 
           const sessionsUsingEvidence = db.sessions?.filter(
             s =>
-              ["in_progress"].includes(s.status) &&
+              [SESSION_STATUS.IN_PROGRESS].includes(s.status) &&
               (s.responses || []).some(
                 r => r.evidenceModelId === obj.id
               )
@@ -2118,7 +2108,7 @@ export function validateEntity(collection, obj, db = null, options = {}) {
 
           const adaptiveSessions = db.sessions?.filter(
             s =>
-              ["in_progress"].includes(s.status) &&
+              [SESSION_STATUS.IN_PROGRESS].includes(s.status) &&
               ["IRT", "BayesianNetwork"].includes(s.selectionStrategy) &&
               (s.responses || []).some(
                 r => r.evidenceModelId === obj.id
@@ -3346,7 +3336,7 @@ export function validateEntity(collection, obj, db = null, options = {}) {
 
   if (collection === "sessions") {
 
-    if (db && ["in_progress", "submitted", "reviewed"].includes(obj.status)) {
+    if (db && [SESSION_STATUS.IN_PROGRESS, SESSION_STATUS.SUBMITTED, "reviewed"].includes(obj.status)) {
 
       for (const r of obj.responses || []) {
 

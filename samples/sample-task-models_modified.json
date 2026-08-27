@@ -7,7 +7,7 @@
     "primaryEvidenceModelId": "em1787411048497_0",
     "expectedObservations": [
       {
-        "observationId": "o1",
+        "observationId": "o3",
         "evidenceModelId": "em1787411048497_0",
         "required": true,
         "weight": 1
@@ -139,7 +139,7 @@
         "maxUses": 250,
         "cooldownPolicy": "session"
       },
-      "allowedInteractionTypes": ["mcq", "constructed"],
+      "allowedInteractionTypes": ["mcq", "constructed", "numeric"],
       "allowedScoringMethods": ["dichotomous", "weighted_sum"]
     },
     "taskCompositionType": "atomic",
@@ -229,7 +229,7 @@
         "maxUses": 1000,
         "cooldownPolicy": "daily"
       },
-      "allowedInteractionTypes": ["mcq", "numeric"],
+      "allowedInteractionTypes": ["mcq", "numeric", "constructed"],
       "allowedScoringMethods": ["dichotomous"]
     },
     "taskCompositionType": "atomic",

@@ -16,6 +16,17 @@
 //    suspend / reactivate / archive — which had no control anywhere in
 //    the product — are reachable too.
 //
+//  * That shared action set deliberately excludes `reviewed` and
+//    `confirmed`: those two are the only transitions the Item Wizard
+//    itself gates on completeness (Step8Review's preflight, blocking
+//    checks, the acknowledgment step for Confirm). A one-click list
+//    action for either bypassed all of that — the server would still
+//    reject a structurally invalid item, but an author could otherwise
+//    confirm something the wizard's own review step would have flagged
+//    as incomplete or ill-advised, just by never opening it. One gate
+//    per irreversible transition: reach both only via Open -> the
+//    wizard's Review step.
+//
 //  * `noConfirmedTasks` hid the search box and the table but not the card
 //    grid, so the empty state was half-applied.
 //
@@ -49,11 +60,13 @@ import { exposureBand, versionLabel } from "./itemConstants";
 
 /* The actions offered for a given status, derived from the lifecycle
    matrix rather than restated. A transition added to the matrix appears
-   here automatically; one removed from it disappears. */
+   here automatically; one removed from it disappears.
+
+   `reviewed` and `confirmed` are intentionally absent -- see the FIXES
+   note above. Every other transition here has no wizard-side
+   completeness gate to bypass, so a direct one-click action is safe. */
 const TRANSITION_LABELS = {
-  reviewed: { label: "Send to review", tone: "bg-amber-100 text-amber-800 hover:bg-amber-200" },
   draft: { label: "Return to draft", tone: "bg-slate-100 text-slate-700 hover:bg-slate-200" },
-  confirmed: { label: "Confirm", tone: "bg-blue-100 text-blue-800 hover:bg-blue-200" },
   operational: { label: "Activate", tone: "bg-emerald-100 text-emerald-800 hover:bg-emerald-200" },
   suspended: { label: "Suspend", tone: "bg-orange-100 text-orange-800 hover:bg-orange-200" },
   archived: { label: "Archive", tone: "bg-slate-200 text-slate-700 hover:bg-slate-300" },

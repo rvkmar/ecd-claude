@@ -460,6 +460,37 @@ export function CompetencyWizardProvider({
   }
 
   /* =====================================================
+     🔹 RETURN TO DRAFT (reviewer rejection)
+     The reviewed -> draft transition the lifecycle matrix has always
+     declared, with no control anywhere in the product to reach it -- a
+     reviewer had no way to send a model back for changes short of
+     editing the database directly.
+  ===================================================== */
+  async function returnToDraft() {
+    if (!model?.id) return;
+
+    const toastId = toast.loading("Returning model to draft...");
+
+    try {
+      const saved = await apiFetch(
+        `/api/competencies/models/${model.id}/lifecycle`,
+        { method: "PATCH", body: JSON.stringify({ nextStatus: "draft" }) },
+        auth
+      );
+
+      setModel(saved);
+      setIsDirty(false);
+
+      queryClient.invalidateQueries({ queryKey: competencyModelsKey });
+      queryClient.invalidateQueries({ queryKey: competencyModelKey(model.id) });
+
+      toast.success("Model returned to draft.", { id: toastId });
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Could not return model to draft."), { id: toastId });
+    }
+  }
+
+  /* =====================================================
      🔹 CLONE MODEL
      Accepts the new version's name from CloneModelDialog (Step 9) and
      forwards it to the backend -- previously this took no argument at
@@ -513,6 +544,7 @@ export function CompetencyWizardProvider({
     saveDraft,
     saveAndReview,
     confirmModel,
+    returnToDraft,
     cloneModel,
   };
 

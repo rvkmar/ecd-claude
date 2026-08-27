@@ -5,7 +5,7 @@
 // Full Cross-Layer Protection (Evidence ↔ Competency)
 
 import express from "express";
-import { authenticateToken } from "../utils/authMiddleware.js";
+import { authenticateToken, authorizeRole } from "../utils/authMiddleware.js";
 import { loadDB, saveDB } from "../../src/utils/db-server.js";
 import { validateEntity } from "../../src/utils/schema.js";
 import { canTransition } from "../utils/lifecycleMatrix.js";
@@ -16,6 +16,12 @@ const router = express.Router();
 // (Previously this file had no auth check at all — added as part of the
 // Phase 1 security hardening pass; see AUTH_SECURITY_FIXES.md.)
 router.use(authenticateToken);
+
+// Every write route also needs a role gate: this file had none at all,
+// while src/config/rolePermissions.js already declared evidenceModels
+// editing as admin-only (canEdit/canDelete).
+const canAuthor = authorizeRole(["admin"]);
+
 const genId = (prefix = "em") => `${prefix}${Date.now()}`;
 
 /* =====================================================
@@ -308,7 +314,7 @@ function createEvidenceModelRecord(payload = {}, db, idSuffix = "") {
 /* =====================================================
    🔹 CREATE (DRAFT ONLY)
 ===================================================== */
-router.post("/", (req, res) => {
+router.post("/", canAuthor, (req, res) => {
   const db = loadDB();
   const result = createEvidenceModelRecord(req.body || {}, db);
   if (!result.ok) return res.status(result.status).json({ error: result.error });
@@ -323,7 +329,7 @@ router.post("/", (req, res) => {
    check). A row whose competency isn't created/confirmed yet just fails
    that row, same as a manual POST / would.
 ===================================================== */
-router.post("/bulk", (req, res) => {
+router.post("/bulk", canAuthor, (req, res) => {
   const rows = req.body;
   if (!Array.isArray(rows)) {
     return res.status(400).json({ error: "Request body must be a JSON array of evidence models." });
@@ -345,7 +351,7 @@ router.post("/bulk", (req, res) => {
 /* =====================================================
    🔹 UPDATE (DRAFT ONLY)
 ===================================================== */
-router.put("/:id", (req, res) => {
+router.put("/:id", canAuthor, (req, res) => {
   const db = loadDB();
   const idx = db.evidenceModels?.findIndex(m => m.id === req.params.id);
 
@@ -409,7 +415,7 @@ router.put("/:id", (req, res) => {
 /* =====================================================
    🔹 CONFIRM (STRICT + CROSS-LAYER PROTECTION)
 ===================================================== */
-router.post("/:id/confirm", (req, res) => {
+router.post("/:id/confirm", canAuthor, (req, res) => {
   const db = loadDB();
   const model = db.evidenceModels?.find(m => m.id === req.params.id);
 
@@ -531,7 +537,7 @@ router.post("/:id/confirm", (req, res) => {
 /* =====================================================
    🔹 CLONE (STRUCTURAL VERSIONING)
 ===================================================== */
-router.post("/:id/clone", (req, res) => {
+router.post("/:id/clone", canAuthor, (req, res) => {
   const db = loadDB();
   const original = db.evidenceModels?.find(m => m.id === req.params.id);
 
@@ -573,7 +579,7 @@ router.post("/:id/clone", (req, res) => {
 /* =====================================================
    🔹 RECALIBRATE (CONFIRMED ONLY)
 ===================================================== */
-router.post("/:id/recalibrate", (req, res) => {
+router.post("/:id/recalibrate", canAuthor, (req, res) => {
   const db = loadDB();
   const model = db.evidenceModels?.find(m => m.id === req.params.id);
 
@@ -643,7 +649,7 @@ router.post("/:id/recalibrate", (req, res) => {
 /* =====================================================
    🔹 ACTIVATE PARAMETER SET (CONFIRMED ONLY)
 ===================================================== */
-router.post("/:id/activate-parameter-set", (req, res) => {
+router.post("/:id/activate-parameter-set", canAuthor, (req, res) => {
   const db = loadDB();
   const model = db.evidenceModels?.find(m => m.id === req.params.id);
 
@@ -672,7 +678,7 @@ router.post("/:id/activate-parameter-set", (req, res) => {
 /* =====================================================
    🔹 DECISION RULE (CONFIRMED ONLY)
 ===================================================== */
-router.post("/:id/decision-rule", (req, res) => {
+router.post("/:id/decision-rule", canAuthor, (req, res) => {
   const db = loadDB();
   const model = db.evidenceModels?.find(m => m.id === req.params.id);
 
@@ -912,7 +918,7 @@ function applyLifecycleTransition(model, nextStatus, db) {
   };
 }
 
-router.patch("/:id/lifecycle", (req, res) => {
+router.patch("/:id/lifecycle", canAuthor, (req, res) => {
 
   const db = loadDB();
   const model = db.evidenceModels?.find(m => m.id === req.params.id);
@@ -945,7 +951,7 @@ router.patch("/:id/lifecycle", (req, res) => {
    one implementation of the readiness gate. Accepts confirmed OR
    suspended as the source, which is what makes reactivation work.
 ===================================================== */
-router.post("/:id/activate", (req, res) => {
+router.post("/:id/activate", canAuthor, (req, res) => {
 
   const db = loadDB();
   const model = db.evidenceModels?.find(m => m.id === req.params.id);
@@ -965,7 +971,7 @@ router.post("/:id/activate", (req, res) => {
 /* =====================================================
    🔹 DELETE (DRAFT ONLY)
 ===================================================== */
-router.delete("/:id", (req, res) => {
+router.delete("/:id", canAuthor, (req, res) => {
   const db = loadDB();
   const model = db.evidenceModels?.find(m => m.id === req.params.id);
 

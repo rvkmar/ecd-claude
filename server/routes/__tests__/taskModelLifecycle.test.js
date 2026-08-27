@@ -610,7 +610,7 @@ describe("a live session blocks deactivation, and Force Deactivate clears it", (
     id: "s1",
     studentId: "stu1",
     taskIds: ["t1"],
-    status: "in-progress",
+    status: "in_progress",
     isCompleted: false,
     responses: [{ itemId: "it1", value: "a" }],
     ...overrides,
@@ -630,13 +630,11 @@ describe("a live session blocks deactivation, and Force Deactivate clears it", (
     expect(db.taskModels[0].status).toBe("operational");
   });
 
-  it.each(["in-progress", "in_progress", "paused", "reopened"])(
+  it.each(["in_progress", "paused", "reopened"])(
     "treats a %s session as live",
     async (status) => {
-      // Both spellings on purpose: sessionRoutes writes "in-progress",
-      // autoFinish and schema.js test "in_progress". Matching one would let
-      // this gate pass for exactly the sessions the other half of the app
-      // considers live.
+      // "in_progress" is the canonical spelling (see src/utils/sessionStatus.js);
+      // the Day 8 migration normalized any legacy "in-progress" records.
       seed(makeTaskModel({ status: "operational" }), [makeItem()],
         [makeEvidenceModel()], [liveSession({ status })]);
 

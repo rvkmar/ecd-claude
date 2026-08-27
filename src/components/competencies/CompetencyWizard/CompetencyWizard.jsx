@@ -12,6 +12,7 @@ import toast from "react-hot-toast";
 import { useCompetencyWizard } from "./CompetencyWizardContext";
 import WizardSidebar from "./WizardSidebar";
 import WizardStepContainer from "./WizardStepContainer";
+import ErrorBoundary from "@/components/ui/ErrorBoundary";
 
 // Steps
 import Step1ModelIdentity from "./steps/Step1ModelIdentity";
@@ -46,6 +47,7 @@ export default function CompetencyWizard({ onCancel }) {
         saveDraft,
         saveAndReview,
         confirmModel,
+        returnToDraft,
         isDirty,
     } = useCompetencyWizard();
 
@@ -171,8 +173,14 @@ export default function CompetencyWizard({ onCancel }) {
                     onSaveDraft={saveDraft}
                     onSaveAndReview={saveAndReview}
                     onConfirm={confirmModel}
+                    onReturnToDraft={returnToDraft}
                 >
-                    {renderStep()}
+                    <ErrorBoundary
+                        resetKey={currentStep}
+                        label={STEP_CONFIG[currentStep - 1]?.label}
+                    >
+                        {renderStep()}
+                    </ErrorBoundary>
                 </WizardStepContainer>
             </div>
         </div>
