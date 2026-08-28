@@ -180,4 +180,28 @@ describe("evidenceModels.statisticalModels[].parameterSets[] — provenance", ()
     const errors = errorsFor(modelWithParameterSet({ calibrationKind: "dina-parameters" }));
     expect(errors.join(" ")).toMatch(/does not apply to statistical model type 'irt'/);
   });
+
+  // ADR 0002 (Day 20): standardErrors/fitStatistics are optional additions
+  // to the calibration response contract, reconciled onto Day 19's shape.
+  it("accepts a parameter set with standardErrors and fitStatistics", () => {
+    const errors = errorsFor(modelWithParameterSet({
+      standardErrors: { a: 0.05 },
+      fitStatistics: { RMSEA: 0.03, M2: 12.4 },
+    }));
+    expect(errors).toEqual([]);
+  });
+
+  it("does not require standardErrors or fitStatistics", () => {
+    expect(errorsFor(modelWithParameterSet())).toEqual([]);
+  });
+
+  it("rejects a non-object standardErrors", () => {
+    const errors = errorsFor(modelWithParameterSet({ standardErrors: "not an object" }));
+    expect(errors.join(" ")).toMatch(/invalid standardErrors/);
+  });
+
+  it("rejects a non-object fitStatistics", () => {
+    const errors = errorsFor(modelWithParameterSet({ fitStatistics: [1, 2, 3] }));
+    expect(errors.join(" ")).toMatch(/invalid fitStatistics/);
+  });
 });

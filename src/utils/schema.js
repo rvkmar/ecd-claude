@@ -270,6 +270,16 @@ export const schema = {
         // required -- unlike the four provenance fields above, this is
         // classification of the import, not evidence of run quality.
         calibrationKind: 'string',
+        // ADR 0002 (Day 20): the rest of the calibration response contract,
+        // alongside the four mandatory provenance fields above. Both
+        // optional -- unlike provenance (an unconditional "can this run be
+        // trusted at all" question), these answer "how good was the fit",
+        // which not every calibration method produces and which genuinely
+        // varies in shape by model family (IRT vs CTT vs DINA/G-DINA fit
+        // indices share no common vocabulary). `fitStatistics` is
+        // deliberately left loosely typed for that reason -- see the ADR.
+        standardErrors: 'object',
+        fitStatistics: 'object',
       }],
       activeParameterSetId: 'string',
     }],
@@ -1067,6 +1077,19 @@ export function validateEntity(collection, obj, db = null, options = {}) {
             errors.push(`Parameter set ${psTag} on model ${sm.id} has invalid calibrationKind '${ps.calibrationKind}'. Must be one of: ${CALIBRATION_FILE_KIND_VALUES.join(", ")}.`);
           } else if (!statisticalModelTypesForCalibrationKind(ps.calibrationKind).includes(sm.type)) {
             errors.push(`Parameter set ${psTag} on model ${sm.id} declares calibrationKind '${ps.calibrationKind}', which does not apply to statistical model type '${sm.type}'.`);
+          }
+        }
+
+        // ADR 0002: optional, but if present must actually be the object
+        // shape the contract describes -- not required of every run.
+        if (ps.standardErrors !== undefined && ps.standardErrors !== null) {
+          if (typeof ps.standardErrors !== "object" || Array.isArray(ps.standardErrors)) {
+            errors.push(`Parameter set ${psTag} on model ${sm.id} has invalid standardErrors: should be object.`);
+          }
+        }
+        if (ps.fitStatistics !== undefined && ps.fitStatistics !== null) {
+          if (typeof ps.fitStatistics !== "object" || Array.isArray(ps.fitStatistics)) {
+            errors.push(`Parameter set ${psTag} on model ${sm.id} has invalid fitStatistics: should be object.`);
           }
         }
       }
