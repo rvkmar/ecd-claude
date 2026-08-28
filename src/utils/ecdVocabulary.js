@@ -218,6 +218,15 @@ export function deriveAllowedScoringMethods(model) {
     case "bayesian_network":
       return ["categorical_activation"];
 
+    // DINA/G-DINA classify each response pattern into a discrete attribute-
+    // mastery STATE, the same shape of output as a Bayesian network's
+    // latent node -- categorical_activation's responsePattern (a `state`
+    // key) fits directly, with no dichotomous/polytomous reading available
+    // since a single item's response isn't itself "correct" or "banded".
+    case "dina":
+    case "gdina":
+      return ["categorical_activation"];
+
     default:
       return [];
   }
@@ -432,4 +441,32 @@ export function psychologicalPerspectiveLabel(value) {
     value ||
     "—"
   );
+}
+
+/* =====================================================
+   8. Calibration file kinds (Day 19, Week 4 core schema)
+   -----------------------------------------------------
+   NOT YET unified with the pre-existing, purely client-side
+   `CALIBRATION_KINDS`/`KIND_MODEL_TYPES` in
+   src/components/evidences/calibration/engines/calibrationFile.js (which
+   also declares `irt-parameters` and a `bayesian-cpt` kind this list
+   doesn't cover, and is wired into the live recalibration-import UI).
+   Reconciling the two is deliberately left for later: that file backs a
+   currently-shipped import flow, and this week's collections are schema-
+   only, so touching it now risks the one thing this pass isn't supposed
+   to risk -- a working feature. This is the authoritative declaration
+   `validateEntity`'s provenance checks are written against; the UI's
+   list is a separate, pre-existing concern until they're consolidated.
+===================================================== */
+
+export const CALIBRATION_FILE_KINDS = [
+  { value: "ctt-statistics", label: "CTT Statistics", statisticalModelTypes: ["ctt"] },
+  { value: "irt-parameters", label: "IRT Parameters", statisticalModelTypes: ["irt", "rasch"] },
+  { value: "dina-parameters", label: "DINA/G-DINA Parameters", statisticalModelTypes: ["dina", "gdina"] },
+];
+
+export const CALIBRATION_FILE_KIND_VALUES = CALIBRATION_FILE_KINDS.map((k) => k.value);
+
+export function statisticalModelTypesForCalibrationKind(kind) {
+  return CALIBRATION_FILE_KINDS.find((k) => k.value === kind)?.statisticalModelTypes || [];
 }

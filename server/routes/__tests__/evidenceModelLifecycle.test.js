@@ -52,7 +52,17 @@ function makeModel(overrides = {}) {
         subtype: "2pl",
         active: true,
         structureConfig: { observableIds: ["o1"] },
-        parameterSets: [{ parameterSetId: "ps1", parameters: { o1: { a: 1.2, b: 0.3 } } }],
+        parameterSets: [{
+          parameterSetId: "ps1",
+          parameters: { o1: { a: 1.2, b: 0.3 } },
+          // Provenance (Day 19): mandatory on every parameter set as of
+          // this session, regardless of `strict` -- see
+          // src/utils/schema.js's per-parameterSet provenance checks.
+          packageVersion: "mirt-1.42.1",
+          converged: true,
+          sampleSize: 480,
+          calibratedAt: "2026-06-01T00:00:00.000Z",
+        }],
         activeParameterSetId: "ps1",
       },
     ],

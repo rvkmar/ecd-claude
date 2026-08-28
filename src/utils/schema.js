@@ -28,6 +28,8 @@ import {
   priorFamiliesForSmVariableType,
   priorDistributionParamsAreValid,
   PSYCHOLOGICAL_PERSPECTIVE_VALUES,
+  CALIBRATION_FILE_KIND_VALUES,
+  statisticalModelTypesForCalibrationKind,
 } from "./ecdVocabulary.js";
 
 // Canonical session status spellings -- see src/utils/sessionStatus.js for
@@ -252,7 +254,22 @@ export const schema = {
         calibratedBy: 'string',
         calibrationMethod: 'string',
         sampleSize: 'number',
-        notes: 'string'
+        notes: 'string',
+        // Provenance, Day 19 (Week 4 core schema): a calibration run whose
+        // package version and convergence cannot be stated is not
+        // defensible (build reference Part 4.3). `packageVersion` and
+        // `converged` are new; `sampleSize`/`calibratedAt` already existed
+        // above but were never actually mandatory -- see the validation
+        // block below, which makes all four jointly required and refuses
+        // to store a non-converged run, regardless of status or `strict`.
+        packageVersion: 'string',
+        converged: 'boolean',
+        // Optional: which of ecdVocabulary.js's CALIBRATION_FILE_KINDS this
+        // run's source file declared itself as, validated for consistency
+        // with the parent statisticalModel's `type` when present. Never
+        // required -- unlike the four provenance fields above, this is
+        // classification of the import, not evidence of run quality.
+        calibrationKind: 'string',
       }],
       activeParameterSetId: 'string',
     }],
@@ -504,6 +521,78 @@ export const schema = {
     stoppingRules: 'object',
     selectionAlgorithm: 'object',
     status: 'string',
+    createdAt: 'date',
+    updatedAt: 'date',
+  },
+
+  // ------------------------------------------------------------------
+  // qMatrixModels — Day 18 (Week 4 core schema). Declared and validated
+  // only; not mounted, no UI, no lifecycle wiring yet. The Q-matrix editor
+  // itself and the DINA/G-DINA config panel on the Evidence Model are both
+  // explicitly W10 deliverables in the build reference -- this collection
+  // exists here only so `dina`/`gdina` statisticalModels entries (added to
+  // `evidenceModels` below) have something real to point at and validate
+  // against.
+  //
+  // An attributes x items matrix: `attributeIds` are the columns, and MUST
+  // each be a `binary`-type entry in the bound competency model's
+  // `smVariables[]` (see ecdVocabulary.js SM_VARIABLE_TYPES) -- a Q-matrix
+  // over a continuous SMV is a category error, not a stricter variant.
+  // `entries[]` are the sparse cells: which items require which attributes.
+  //
+  // Named `qMatrixModels`, not `qMatrices`, so it survives dbAdapter.js's
+  // naive trailing-"s" singularizer (`qMatrices` -> `qMatrice`, wrong;
+  // `qMatrixModels` -> `qMatrixModel`, correct) -- see CLAUDE.md's note on
+  // keeping collection names simple plurals.
+  //
+  // Declared in the plain-shape style for the same reason `assemblyModels`
+  // and `curricularPolicies` are: the JSON-schema branch in validateEntity
+  // returns early and would never reach the deep
+  // `collection === "qMatrixModels"` referential-integrity checks below.
+  // ------------------------------------------------------------------
+  qMatrixModels: {
+    id: 'string',
+    name: 'string',
+    description: 'string',
+    competencyModelId: 'string',
+    competencyModelVersion: 'number',
+    attributeIds: 'array',
+    entries: 'array',
+    status: 'string',
+    createdAt: 'date',
+    updatedAt: 'date',
+  },
+
+  // ------------------------------------------------------------------
+  // compositeLibrary — Day 19 (Week 4 core schema). Schema declaration
+  // only: the actual builder (`compositeLibrary/builder.js`, walking
+  // Task Model -> items -> evidence models to COMPILE a package) is Day
+  // 24. This just gives that future builder something real to write into
+  // and validate against, per-item referential integrity today.
+  //
+  // Deliberately has NO `status`/lifecycle. Per the build reference, a
+  // composite library entry is "a compiled versioned package built at
+  // Task Model activation" -- a build ARTIFACT keyed by
+  // (taskModelId, taskModelVersion), not an authored entity a human
+  // drafts/reviews/revises. `parameterSets[]` above is the closer
+  // precedent in this codebase: append-only, stamped at creation, never
+  // transitioned through a status enum. `active` marks which package is
+  // currently served for a given taskModelId; at most one may be active
+  // (enforced below), the same "exactly one active X" shape as
+  // statisticalModels' activeCount check.
+  //
+  // Declared in the plain-shape style for the same reason `assemblyModels`
+  // and `qMatrixModels` are: the JSON-schema branch in validateEntity
+  // returns early and would never reach the deep
+  // `collection === "compositeLibrary"` referential-integrity checks below.
+  // ------------------------------------------------------------------
+  compositeLibrary: {
+    id: 'string',
+    taskModelId: 'string',
+    taskModelVersion: 'number',
+    compiledAt: 'date',
+    active: 'boolean',
+    items: 'array',
     createdAt: 'date',
     updatedAt: 'date',
   },
@@ -910,8 +999,76 @@ export function validateEntity(collection, obj, db = null, options = {}) {
         }
       }
 
+      /* DINA / G-DINA — Day 18. A diagnostic classification model is
+         defined over a Q-matrix, not authored freestanding, so its
+         structureConfig carries a POINTER (`qMatrixId`) rather than a
+         duplicated copy of the attribute list. Every attribute the bound
+         Q-matrix declares must be a binary SMV -- this is the check the
+         Day 18 exit criterion names ("a G-DINA model ... refuses a
+         continuous SMV"), enforced here even though qMatrixModels' own
+         validation already enforces it at authoring time, because this
+         evidence model may be validated against a `db` snapshot where
+         that invariant was violated by some other path. */
+      if (sm.type === "dina" || sm.type === "gdina") {
+        const qMatrixId = sm.structureConfig?.qMatrixId;
+
+        if (strict && !qMatrixId) {
+          errors.push(`Statistical model ${sm.id} (${sm.type}) requires structureConfig.qMatrixId.`);
+        }
+
+        if (qMatrixId && db) {
+          const qMatrix = db.qMatrixModels?.find(q => q.id === qMatrixId);
+          if (!qMatrix) {
+            errors.push(`Statistical model ${sm.id} (${sm.type}) references unknown qMatrixId '${qMatrixId}'.`);
+          } else {
+            const boundCompetencyModel = db.competencyModels?.find(m => m.id === qMatrix.competencyModelId);
+            const nonBinaryAttr = (qMatrix.attributeIds || [])
+              .map(attrId => boundCompetencyModel?.smVariables?.find(smv => smv.id === attrId))
+              .find(smv => smv && smv.type !== "binary");
+
+            if (nonBinaryAttr) {
+              errors.push(
+                `Statistical model ${sm.id} (${sm.type}) is bound to Q-matrix '${qMatrixId}', which references non-binary SMV '${nonBinaryAttr.id}' (type '${nonBinaryAttr.type}'). DINA/G-DINA models require every Q-matrix attribute to be a binary Student Model Variable.`
+              );
+            }
+          }
+        }
+      }
+
       if (obj.status === "draft" && sm.parameterSets?.length > 0) {
         errors.push(`Draft evidence model cannot contain parameterSets.`);
+      }
+
+      /* PROVENANCE — Day 19. Mandatory on every parameterSet, at every
+         status (never gated by `strict`): a calibration run whose package
+         version and convergence cannot be stated is not defensible, and a
+         run that did not converge must be refused outright rather than
+         stored as though it were usable. */
+      for (const ps of sm.parameterSets || []) {
+        const psTag = ps.parameterSetId || "(missing id)";
+
+        if (!ps.packageVersion) {
+          errors.push(`Parameter set ${psTag} on model ${sm.id} requires packageVersion.`);
+        }
+        if (typeof ps.sampleSize !== "number" || ps.sampleSize <= 0) {
+          errors.push(`Parameter set ${psTag} on model ${sm.id} requires a positive sampleSize.`);
+        }
+        if (!ps.calibratedAt) {
+          errors.push(`Parameter set ${psTag} on model ${sm.id} requires calibratedAt.`);
+        }
+        if (typeof ps.converged !== "boolean") {
+          errors.push(`Parameter set ${psTag} on model ${sm.id} must declare converged.`);
+        } else if (!ps.converged) {
+          errors.push(`Parameter set ${psTag} on model ${sm.id} did not converge and cannot be stored as a parameter set.`);
+        }
+
+        if (ps.calibrationKind !== undefined && ps.calibrationKind !== null) {
+          if (!CALIBRATION_FILE_KIND_VALUES.includes(ps.calibrationKind)) {
+            errors.push(`Parameter set ${psTag} on model ${sm.id} has invalid calibrationKind '${ps.calibrationKind}'. Must be one of: ${CALIBRATION_FILE_KIND_VALUES.join(", ")}.`);
+          } else if (!statisticalModelTypesForCalibrationKind(ps.calibrationKind).includes(sm.type)) {
+            errors.push(`Parameter set ${psTag} on model ${sm.id} declares calibrationKind '${ps.calibrationKind}', which does not apply to statistical model type '${sm.type}'.`);
+          }
+        }
       }
 
       if (obj.status === "confirmed") {
@@ -1108,16 +1265,17 @@ export function validateEntity(collection, obj, db = null, options = {}) {
           }
         }
 
-        // Bayesian Network produces posterior probabilities
-        if (activeModel.type === "bayesian_network") {
+        // Bayesian Network, DINA and G-DINA all produce posterior/mastery
+        // PROBABILITIES over discrete states, not a raw or latent score.
+        if (["bayesian_network", "dina", "gdina"].includes(activeModel.type)) {
           if (dr.type === "mastery" && dr.threshold > 1) {
             errors.push(
-              "Bayesian network mastery decision must use posterior probability between 0 and 1."
+              `${activeModel.type === "bayesian_network" ? "Bayesian network" : "DINA/G-DINA"} mastery decision must use posterior probability between 0 and 1.`
             );
           }
           if (dr.type === "score_band") {
             errors.push(
-              "Bayesian network does not support score_band without explicit discretization layer."
+              `${activeModel.type === "bayesian_network" ? "Bayesian network" : "DINA/G-DINA"} does not support score_band without explicit discretization layer.`
             );
           }
         }
@@ -1166,8 +1324,16 @@ export function validateEntity(collection, obj, db = null, options = {}) {
           // categorical deliberately excludes it. Mirrors
           // modelGuidanceLibrary.js's allowedVariableTypes -- keep the two
           // in step, or Step 6 will offer a model confirmation rejects.
+          //
+          // `dina`/`gdina` are declared allowed here (Day 18) WITHOUT a
+          // matching modelGuidanceLibrary.js entry -- deliberately, since
+          // that library drives Step 6's picker and the DINA/G-DINA config
+          // panel is an explicit W10 deliverable, not this week's. That
+          // asymmetry is safe in only this one direction: schema.js
+          // permitting a model Step 6 doesn't yet offer can never produce
+          // the "offered then rejected" bug the comment above warns about.
           if (vType === "binary") {
-            const allowed = ["ctt", "rasch", "irt", "bayesian_network", "sum"];
+            const allowed = ["ctt", "rasch", "irt", "bayesian_network", "sum", "dina", "gdina"];
             if (!allowed.includes(sm.type)) errors.push(`Statistical model '${sm.type}' incompatible with binary competency.`);
             if (sm.type === "irt" && sm.subtype && sm.subtype !== "1pl") {
               errors.push("Binary competency allows only 1PL (Rasch) IRT.");
@@ -3869,6 +4035,154 @@ export function validateEntity(collection, obj, db = null, options = {}) {
       errors.push("selectionAlgorithm.policyId is required.");
     } else if (db && !db.policies?.find(p => p.id === obj.selectionAlgorithm.policyId)) {
       errors.push(`Invalid selectionAlgorithm.policyId: ${obj.selectionAlgorithm.policyId}`);
+    }
+  }
+
+  /* =====================================================
+     Q-MATRIX MODELS — Day 18, Week 4 core schema
+     -----------------------------------------------------
+     Structural + referential-integrity validation only, mirroring
+     assemblyModels' Day 17 scope. Every `attributeIds` entry must be a
+     `binary`-type SMV -- a Q-matrix is defined over binary attributes by
+     construction, not merely "usually". No all-zero-row / identifiability
+     advisory checks yet; those are UI-facing (Q-matrix editor, W10).
+  ===================================================== */
+
+  if (collection === "qMatrixModels") {
+
+    if (!obj.name) errors.push("Q-matrix name is required.");
+    if (!obj.competencyModelId) errors.push("competencyModelId is required.");
+    if (!obj.status) {
+      errors.push("status is required.");
+    } else if (!STATUS.includes(obj.status)) {
+      errors.push(`Invalid Q-matrix status '${obj.status}'.`);
+    }
+
+    const competencyModel = db && obj.competencyModelId
+      ? db.competencyModels?.find(m => m.id === obj.competencyModelId)
+      : undefined;
+
+    if (db && obj.competencyModelId && !competencyModel) {
+      errors.push(`Invalid competencyModelId: ${obj.competencyModelId}`);
+    }
+
+    const knownSmVariables = new Map(
+      (competencyModel?.smVariables || []).map(smv => [smv.id, smv])
+    );
+
+    const declaredAttributeIds = new Set();
+
+    if (obj.attributeIds !== undefined && !Array.isArray(obj.attributeIds)) {
+      errors.push("attributeIds should be array");
+    } else if (Array.isArray(obj.attributeIds)) {
+      obj.attributeIds.forEach((attrId, i) => {
+        if (declaredAttributeIds.has(attrId)) {
+          errors.push(`Duplicate attributeIds entry '${attrId}'.`);
+        }
+        declaredAttributeIds.add(attrId);
+
+        // Only checkable once the competency model is resolvable; a
+        // dangling competencyModelId is already reported above.
+        if (competencyModel) {
+          const smv = knownSmVariables.get(attrId);
+          if (!smv) {
+            errors.push(`attributeIds[${i}] names '${attrId}', which does not exist on competency model '${obj.competencyModelId}'.`);
+          } else if (smv.type !== "binary") {
+            errors.push(`attributeIds[${i}] ('${attrId}') is a '${smv.type}' Student Model Variable. Q-matrix attributes must be binary.`);
+          }
+        }
+      });
+    }
+
+    if (obj.entries !== undefined && !Array.isArray(obj.entries)) {
+      errors.push("entries should be array");
+    } else if (Array.isArray(obj.entries)) {
+      const seenPairs = new Set();
+
+      obj.entries.forEach((entry, i) => {
+        const tag = `entries[${i}]`;
+
+        if (!entry || typeof entry !== "object" || !entry.itemId || !entry.attributeId) {
+          errors.push(`${tag} requires both itemId and attributeId.`);
+          return;
+        }
+
+        const pairKey = `${entry.itemId}::${entry.attributeId}`;
+        if (seenPairs.has(pairKey)) {
+          errors.push(`${tag} duplicates the (itemId, attributeId) pair for '${entry.itemId}' / '${entry.attributeId}'.`);
+        }
+        seenPairs.add(pairKey);
+
+        if (!declaredAttributeIds.has(entry.attributeId)) {
+          errors.push(`${tag} references attributeId '${entry.attributeId}', which is not declared in attributeIds.`);
+        }
+
+        if (db && !db.items?.find(it => it.id === entry.itemId)) {
+          errors.push(`${tag} references unknown itemId '${entry.itemId}'.`);
+        }
+
+        if (entry.required !== undefined && typeof entry.required !== "boolean") {
+          errors.push(`${tag}.required should be boolean`);
+        }
+      });
+    }
+  }
+
+  /* =====================================================
+     COMPOSITE LIBRARY — Day 19, Week 4 core schema
+     -----------------------------------------------------
+     Structural + referential-integrity validation only. The builder
+     that actually compiles one of these from a Task Model is Day 24;
+     this just gives it a real shape to write into.
+  ===================================================== */
+
+  if (collection === "compositeLibrary") {
+
+    if (!obj.taskModelId) errors.push("taskModelId is required.");
+    if (typeof obj.taskModelVersion !== "number") errors.push("taskModelVersion is required and must be a number.");
+    if (!obj.compiledAt) errors.push("compiledAt is required.");
+
+    const taskModel = db && obj.taskModelId
+      ? db.taskModels?.find(tm => tm.id === obj.taskModelId)
+      : undefined;
+
+    if (db && obj.taskModelId && !taskModel) {
+      errors.push(`Invalid taskModelId: ${obj.taskModelId}`);
+    }
+
+    if (obj.items !== undefined && !Array.isArray(obj.items)) {
+      errors.push("items should be array");
+    } else if (Array.isArray(obj.items)) {
+      obj.items.forEach((entry, i) => {
+        const tag = `items[${i}]`;
+
+        if (!entry || typeof entry !== "object" || !entry.itemId) {
+          errors.push(`${tag} requires an itemId.`);
+          return;
+        }
+
+        if (db) {
+          const item = db.items?.find(it => it.id === entry.itemId);
+          if (!item) {
+            errors.push(`${tag} references unknown itemId '${entry.itemId}'.`);
+          } else if (item.taskModelId !== obj.taskModelId) {
+            errors.push(`${tag} ('${entry.itemId}') belongs to taskModelId '${item.taskModelId}', not this library's '${obj.taskModelId}'.`);
+          }
+        }
+      });
+    }
+
+    // At most one compiled package may be the ACTIVE one for a given
+    // Task Model -- the same "exactly one active X" invariant
+    // statisticalModels enforces above, so exactly one version is ever
+    // being served at a time.
+    if (obj.active && db && obj.taskModelId) {
+      const otherActive = db.compositeLibrary?.find(
+        cl => cl.id !== obj.id && cl.taskModelId === obj.taskModelId && cl.active
+      );
+      if (otherActive) {
+        errors.push(`Task model '${obj.taskModelId}' already has an active composite library package ('${otherActive.id}').`);
+      }
     }
   }
 
