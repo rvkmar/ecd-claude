@@ -200,15 +200,14 @@ describe("identifyEvidence — response pattern matching semantics", () => {
     expect(result.rationale).toBe("The real rule, now reachable.");
   });
 
-  // KNOWN GAP: workProduct values that are themselves arrays (e.g. a
-  // multi-select response, `selected: ["opt_a","opt_b"]`) never match an
-  // array-typed pattern, because `Array.prototype.includes` on the pattern
-  // array does a reference/element check against the whole `actual` array,
-  // not a set-intersection. This fails safe today (null + warning) rather
-  // than silently misclassifying, but it means multi-select work products
-  // can never be identified against this matching scheme as currently
-  // written.
-  it("CURRENT BEHAVIOR (documents a real gap): a multi-select (array-valued) work product never matches an array-typed pattern", () => {
+  // FIXED (Day 30 adversarial review): a multi-select work product
+  // (`selected: ["opt_a", ...]`) now matches an array-typed pattern by
+  // overlap -- both sides are normalized to arrays and compared for any
+  // shared value, rather than comparing the whole actual array by
+  // reference against the pattern array's elements (which could never
+  // succeed). Single-value-vs-single-value matching (the common MCQ case)
+  // is unaffected -- see the tests above, still passing.
+  it("a multi-select (array-valued) work product matches an array-typed pattern by overlap", () => {
     const multiSelectItem = {
       ...equivalentFractionsItem,
       scoring: {
@@ -217,9 +216,22 @@ describe("identifyEvidence — response pattern matching semantics", () => {
         ],
       },
     };
-    const result = identifyEvidence({ selected: ["opt_a"] }, multiSelectItem, makeDb());
-    expect(result.activated).toBeNull();
-    expect(result.warning).toMatch(/did not match any declared responsePattern/);
+    expect(identifyEvidence({ selected: ["opt_a"] }, multiSelectItem, makeDb()).activated).toBe(true);
+    expect(identifyEvidence({ selected: ["opt_a", "opt_c"] }, multiSelectItem, makeDb()).activated).toBe(true);
+    expect(identifyEvidence({ selected: ["opt_c", "opt_d"] }, multiSelectItem, makeDb()).activated).toBeNull();
+  });
+
+  it("a single-valued pattern matches a multi-select work product that includes it", () => {
+    const item = {
+      ...equivalentFractionsItem,
+      scoring: {
+        evidenceActivationMap: [
+          { responsePattern: { selected: "opt_a" }, activatesObservable: true, rationale: "Includes the key option." },
+        ],
+      },
+    };
+    expect(identifyEvidence({ selected: ["opt_a", "opt_c"] }, item, makeDb()).activated).toBe(true);
+    expect(identifyEvidence({ selected: ["opt_c", "opt_d"] }, item, makeDb()).activated).toBeNull();
   });
 
   it("handles falsy pattern/work-product values (0, false, empty string) with strict equality, no loose coercion", () => {

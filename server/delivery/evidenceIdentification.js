@@ -26,12 +26,19 @@
 
 /**
  * True if `pattern`'s keys all match the corresponding keys on
- * `workProduct`. A pattern value that is an array means "any of these" --
- * this is a membership test, not an equality test, so
- * `{ selected: ["opt_b","opt_c"] }` matches a work product with
- * `selected: "opt_c"`. This is the literal shape used throughout the
- * repo's own worked example (samples/sample-items.json), not an invented
- * convention.
+ * `workProduct`. Both the pattern's value and the work product's value are
+ * normalized to arrays and compared for overlap ("any of these matches any
+ * of those") -- so a single-value pattern against a single-value response
+ * is an equality check (the common MCQ case, unchanged from the original
+ * design), a multi-valued PATTERN against a single-value response is "any
+ * of these" (`{ selected: ["opt_b","opt_c"] }` matches `selected: "opt_c"`
+ * -- the literal shape samples/sample-items.json uses), and -- Day 30, an
+ * adversarial-review finding -- a single-valued pattern against a
+ * multi-select RESPONSE (`selected: ["opt_a","opt_c"]`) or a multi-valued
+ * pattern against a multi-select response both now resolve by the same
+ * overlap rule, rather than the multi-select response silently never
+ * matching anything at all (arrays being compared by reference always
+ * failed strict equality, and never appeared inside another array either).
  *
  * An empty pattern (`{}`, or no keys at all) NEVER matches, regardless of
  * work product. `Object.entries({}).every(...)` is vacuously true, which
@@ -49,8 +56,9 @@ function matchesResponsePattern(pattern, workProduct) {
 
   return Object.entries(pattern).every(([key, expected]) => {
     const actual = workProduct[key];
-    if (Array.isArray(expected)) return expected.includes(actual);
-    return actual === expected;
+    const expectedValues = Array.isArray(expected) ? expected : [expected];
+    const actualValues = Array.isArray(actual) ? actual : [actual];
+    return actualValues.some((a) => expectedValues.includes(a));
   });
 }
 

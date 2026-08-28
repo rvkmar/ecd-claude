@@ -324,6 +324,196 @@ describe("POST /:id/submit — item-based delivery (Day 28)", () => {
   });
 });
 
+// ---------------------------------------------------------------------
+// An adversarial review of Week 6's whole delivery pipeline (Day 30)
+// pinned seven real defects here as "BEHAVIOUR (suspected bug)" tests.
+// All seven were fixed in production code the same day; these are now the
+// regression tests for those fixes, not documentation of a known gap.
+// ---------------------------------------------------------------------
+describe("POST /:id/submit — item path, fixes from the Day 30 adversarial review", () => {
+  it("FIXED: an item-based response no longer makes a LATER legacy questionId submit fail after the Evidence Model is recalibrated", async () => {
+    // The review's most serious finding: validateEntity("sessions", ...)
+    // used to re-validate EVERY historical response against the CURRENT db
+    // on every write, so a stale provenance pointer left by an earlier
+    // item-based response 400'd a later, unrelated legacy request. Fixed
+    // by only re-checking the most-recently-appended response -- each
+    // response is provenance-checked once, at the moment it's added.
+    const db = makeDb({
+      sessions: [makeSession({ taskIds: ["t1", "t2"] })],
+      tasks: [makeTask(), makeTask({ id: "t2" })],
+      evidenceModels: [structuredClone(evidenceModel)],
+    });
+    const app = buildApp(db);
+
+    const first = await request(app)
+      .post("/api/sessions/s1/submit")
+      .send({ taskId: "t1", itemId: "item1", rawAnswer: "opt_a" });
+    expect(first.status).toBe(200);
+
+    // A normal authoring action: POST /api/evidence-models/:id/recalibrate
+    // pushes a new parameter set and flips activeParameterSetId in place.
+    const sm = db.evidenceModels[0].statisticalModels[0];
+    sm.parameterSets.push({
+      parameterSetId: "ps2",
+      parameters: { o1: { a: 1.2, b: 0.1 } },
+      packageVersion: "pilot-2",
+      converged: true,
+      sampleSize: 900,
+      calibratedAt: "2026-06-01T00:00:00.000Z",
+    });
+    sm.activeParameterSetId = "ps2";
+
+    const legacy = await request(app)
+      .post("/api/sessions/s1/submit")
+      .send({ taskId: "t2", questionId: "q1", rawAnswer: "x", scoredValue: 1 });
+
+    expect(legacy.status).toBe(200);
+    expect(legacy.body.responses[1].scoredValue).toBe(1);
+  });
+
+  it("FIXED: a failed recordItemUsage is now surfaced as response.exposureNote, not silently swallowed", async () => {
+    const noPsychometrics = { ...operationalItem };
+    delete noPsychometrics.psychometrics;
+
+    const db = makeDb({
+      items: [noPsychometrics],
+      evidenceModels: [operationalEvidenceModel],
+      taskModels: [operationalTaskModel],
+    });
+    const app = buildApp(db);
+
+    const res = await request(app)
+      .post("/api/sessions/s1/submit")
+      .send({ taskId: "t1", itemId: "item1", rawAnswer: "opt_a" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.responses[0].activated).toBe(true);
+    expect(res.body.responses[0].exposureNote).toMatch(/Exposure update failed validation/);
+    expect(db.items[0].exposureControl.usageCount).toBe(0);
+  });
+
+  it("FIXED: the item path now refuses an item that doesn't belong to the submitted task's Task Model", async () => {
+    const db = makeDb({
+      sessions: [makeSession({ taskIds: ["t1", "t2"] })],
+      tasks: [makeTask(), makeTask({ id: "t2", taskModelId: "tm-unrelated" })],
+    });
+    db.taskModels.push({
+      id: "tm-unrelated",
+      versionNumber: 1,
+      status: "operational",
+      locked: true,
+      evidenceModelIds: [],
+      expectedObservations: [],
+    });
+    const app = buildApp(db);
+
+    const res = await request(app)
+      .post("/api/sessions/s1/submit")
+      .send({ taskId: "t2", itemId: "item1", rawAnswer: "opt_a" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/belongs to Task Model 'tm1', not this task's 'tm-unrelated'/);
+    expect(db.tasks[1].generatedObservationIds).not.toContain("o1");
+  });
+
+  it("FIXED: resubmitting the same taskId is refused with 409, not silently duplicated", async () => {
+    const db = makeDb({
+      sessions: [makeSession({ taskIds: ["t1", "t2"] })],
+      tasks: [makeTask(), makeTask({ id: "t2" })],
+      items: [operationalItem],
+      evidenceModels: [operationalEvidenceModel],
+      taskModels: [operationalTaskModel],
+    });
+    const app = buildApp(db);
+
+    const payload = { taskId: "t1", itemId: "item1", rawAnswer: "opt_a" };
+    const first = await request(app).post("/api/sessions/s1/submit").send(payload);
+    const retry = await request(app).post("/api/sessions/s1/submit").send(payload);
+
+    expect(first.status).toBe(200);
+    expect(retry.status).toBe(409);
+    expect(retry.body.error).toMatch(/already has a recorded response/);
+    expect(db.sessions[0].responses).toHaveLength(1);
+    expect(db.sessions[0].currentTaskIndex).toBe(1);
+    expect(db.items[0].exposureControl.usageCount).toBe(1);
+
+    // t2 is still reachable.
+    const next = await request(app).get("/api/sessions/s1/next-task");
+    expect(next.body.taskId).toBe("t2");
+  });
+
+  it("FIXED: an item with no observationId now returns a graceful 400, not a 500", async () => {
+    const noObservation = { ...item, status: "draft" };
+    delete noObservation.observationId;
+    const db = makeDb({ items: [noObservation] });
+    const app = buildApp(db);
+
+    const res = await request(app)
+      .post("/api/sessions/s1/submit")
+      .send({ taskId: "t1", itemId: "item1", rawAnswer: "opt_a" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/has no observationId/);
+  });
+
+  it("FIXED: a task record with no generatedObservationIds array no longer 500s on the item path", async () => {
+    const db = makeDb();
+    delete db.tasks[0].generatedObservationIds;
+    const app = buildApp(db);
+
+    const res = await request(app)
+      .post("/api/sessions/s1/submit")
+      .send({ taskId: "t1", itemId: "item1", rawAnswer: "opt_a" });
+
+    expect(res.status).toBe(200);
+    expect(db.tasks[0].generatedObservationIds).toContain("o1");
+  });
+
+  it("FIXED: a suspended (over-exposed) item is refused delivery outright, rather than scored with a frozen counter", async () => {
+    const overExposed = {
+      ...operationalItem,
+      status: "suspended",
+      exposureControl: { ...operationalItem.exposureControl, usageCount: 5 },
+    };
+    const db = makeDb({
+      items: [overExposed],
+      evidenceModels: [operationalEvidenceModel],
+      taskModels: [operationalTaskModel],
+    });
+    const app = buildApp(db);
+
+    const res = await request(app)
+      .post("/api/sessions/s1/submit")
+      .send({ taskId: "t1", itemId: "item1", rawAnswer: "opt_a" });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/is 'suspended' and cannot be delivered/);
+    expect(db.items[0].exposureControl.usageCount).toBe(5);
+  });
+
+  it("FIXED: a multi-select (array) rawAnswer is wrapped correctly and can now match a declared pattern", async () => {
+    const multiSelectItem = {
+      ...item,
+      scoring: {
+        method: "dichotomous",
+        maxScore: 1,
+        evidenceActivationMap: [
+          { responsePattern: { selected: ["opt_a", "opt_b"] }, activatesObservable: true, rationale: "Either is acceptable." },
+        ],
+      },
+    };
+    const db = makeDb({ items: [multiSelectItem] });
+    const app = buildApp(db);
+
+    const res = await request(app)
+      .post("/api/sessions/s1/submit")
+      .send({ taskId: "t1", itemId: "item1", rawAnswer: ["opt_a"] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.responses[0].activated).toBe(true);
+  });
+});
+
 describe("POST /:id/submit — ITEM_DELIVERY_ENABLED rollback flag", () => {
   it(
     "falls back to the legacy path when ITEM_DELIVERY_ENABLED=false, even if itemId is sent",

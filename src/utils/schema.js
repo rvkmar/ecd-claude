@@ -3655,7 +3655,27 @@ export function validateEntity(collection, obj, db = null, options = {}) {
 
     if (db && [SESSION_STATUS.IN_PROGRESS, SESSION_STATUS.SUBMITTED, "reviewed"].includes(obj.status)) {
 
-      for (const r of obj.responses || []) {
+      // Day 30 (adversarial review finding): this loop used to re-check
+      // EVERY historical response against CURRENT db state on every single
+      // session write (a submit, a pause, a finish -- anything that calls
+      // validateEntity("sessions", ...)). Provenance is meant to answer
+      // "was this response consistent with the world at the moment it was
+      // scored" -- a historical fact, checked once, at append time.
+      // Re-validating it against a WORLD THAT HAS SINCE MOVED ON (an
+      // Evidence Model recalibrated, an item's version bumped) meant a
+      // single recalibration permanently 400'd every future submit on
+      // every session that had already scored against that Evidence Model
+      // -- including sessions using the completely unrelated legacy
+      // db.questions path, since this loop iterated the whole array with
+      // no distinction between item-based and legacy responses mixed into
+      // the same session. Only the most-recently-appended response is
+      // actually being asserted as valid by the write in progress; every
+      // earlier one was already checked when IT was appended and does not
+      // need re-litigating against a present that has moved past it.
+      const responses = obj.responses || [];
+      const mostRecent = responses.length ? [responses[responses.length - 1]] : [];
+
+      for (const r of mostRecent) {
 
         // Day 28: this whole block -- evidenceModelId/parameterSetId/
         // version provenance -- only ever meant anything for item-based

@@ -190,6 +190,42 @@ router.post("/:id/submit", async (req, res) => {
       return res.status(400).json({ error: `Invalid itemId: ${itemId}` });
     }
 
+    // Day 30 (adversarial review finding): the legacy path below validates
+    // that a submitted observation/evidence belongs to the task's own
+    // Task Model; this block had dropped that check entirely -- any item
+    // could be submitted against any task in the session, attributing its
+    // evidence to the wrong Task Model instance with no error at all.
+    if (!task) {
+      return res.status(400).json({ error: `Task ${taskId} has no task instance record.` });
+    }
+    if (item.taskModelId !== task.taskModelId) {
+      return res.status(400).json({
+        error: `Item '${itemId}' belongs to Task Model '${item.taskModelId}', not this task's '${task.taskModelId}'.`,
+      });
+    }
+
+    // Day 30 (adversarial review finding): an item already suspended
+    // (auto-retired for exceeding its exposure ceiling) or archived kept
+    // being delivered and scored through this path with no check at all --
+    // defeating the entire point of the ceiling recordItemUsage() enforces.
+    // A draft/reviewed/confirmed item is still deliberately deliverable
+    // here (Day 29's own preview/test-delivery design: it scores correctly,
+    // it just accrues no exposure) -- only a status that means "this item
+    // has been deliberately pulled from service" is refused.
+    if (["suspended", "archived"].includes(item.status)) {
+      return res.status(409).json({ error: `Item '${itemId}' is '${item.status}' and cannot be delivered.` });
+    }
+
+    // Day 30 (adversarial review finding): resubmitting the same taskId
+    // (a client retry, a double-click) used to silently duplicate the
+    // response, double-count exposure, and over-advance currentTaskIndex
+    // past a task that was never actually reached -- a session-ending bug
+    // for the `fixed` strategy, which is purely index-driven. Refused
+    // outright rather than silently accepted twice.
+    if (session.responses.some(r => r.taskId === taskId)) {
+      return res.status(409).json({ error: `Task ${taskId} already has a recorded response for this session.` });
+    }
+
     // src/utils/schema.js's `collection === "sessions"` validation (a
     // pre-existing contract this route never previously had a caller for)
     // requires every response, once a session is live, to carry calibration
@@ -212,12 +248,29 @@ router.post("/:id/submit", async (req, res) => {
       });
     }
 
+    // Day 30 (adversarial review finding): observationId is only required
+    // under strict/confirm-time validation (src/utils/schema.js), so a
+    // draft item with none would reach identifyEvidence() and hit its
+    // "requires an item with an observationId" throw -- a data-quality
+    // problem surfacing as an uncaught 500, not the clear 4xx every other
+    // malformed-reference case in this block gets.
+    if (!item.observationId) {
+      return res.status(400).json({ error: `Item '${itemId}' has no observationId; it cannot be scored.` });
+    }
+
     // A structured work product is passed through as-is; a bare scalar
     // (the common case -- an option id, a numeric value) is wrapped into
     // the `{ selected: ... }` shape identifyEvidence's matching expects,
     // matching the repo's own worked example (samples/sample-items.json).
+    // An ARRAY is also "not yet structured" for this purpose (Day 30
+    // finding): `typeof [] === "object"` made a multi-select rawAnswer like
+    // `["opt_a","opt_b"]` pass through unwrapped, so identifyEvidence tried
+    // to match pattern keys against numeric array indices and never
+    // matched anything real.
     const workProduct =
-      rawAnswer && typeof rawAnswer === "object" ? rawAnswer : { selected: rawAnswer };
+      rawAnswer && typeof rawAnswer === "object" && !Array.isArray(rawAnswer)
+        ? rawAnswer
+        : { selected: rawAnswer };
 
     const evidence = identifyEvidence(workProduct, item, db);
 
@@ -244,6 +297,11 @@ router.post("/:id/submit", async (req, res) => {
     session.currentTaskIndex = Math.min(session.currentTaskIndex + 1, session.taskIds.length);
     session.updatedAt = new Date().toISOString();
 
+    // Day 30: defensive -- a task instance record predating this field, or
+    // authored by hand, should not crash delivery over a missing array.
+    if (!Array.isArray(task.generatedObservationIds)) {
+      task.generatedObservationIds = [];
+    }
     if (evidence.observationId && !task.generatedObservationIds.includes(evidence.observationId)) {
       task.generatedObservationIds.push(evidence.observationId);
     }
@@ -254,11 +312,22 @@ router.post("/:id/submit", async (req, res) => {
     // student, not the record-usage HTTP route (author-gated, and until
     // today had no caller at all). A no-op for a non-operational item
     // (e.g. delivered in a preview/test context) is not an error here;
-    // only a truly operational item accrues real exposure.
+    // only a truly operational item accrues real exposure. Day 30
+    // (adversarial review finding): the failure case used to be silently
+    // swallowed with no `else` branch at all, so an operational item that
+    // merely failed strict re-validation (e.g. missing a field required
+    // only once `status` reaches "operational") accrued no exposure with
+    // zero indication anywhere in the response -- undermining the very
+    // "real measurements, not permanent zeros" claim this day exists to
+    // make. Surfaced as a response field; never blocks the score itself,
+    // since a scoring failure and an exposure-bookkeeping failure are
+    // different severities and the student's response is valid either way.
     const itemIndex = db.items.findIndex(it => it.id === itemId);
     const usageResult = recordItemUsage(item, db, {});
     if (usageResult.ok) {
       db.items[itemIndex] = usageResult.item;
+    } else {
+      response.exposureNote = usageResult.error;
     }
 
     const { valid, errors } = validateEntity("sessions", session, db);
