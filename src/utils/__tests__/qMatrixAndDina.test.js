@@ -80,22 +80,37 @@ describe("qMatrixModels — passing fixture", () => {
 });
 
 describe("qMatrixModels — deliberate mutations", () => {
+  // NOTE: these three attributeIds-mutation tests clear `entries` to `[]`.
+  // The default fixture's entries reference BOTH "attr-equivalence" and
+  // "attr-simplification"; a mutation that removes "attr-simplification"
+  // from attributeIds (as all three of these do) also makes those entries
+  // reference an undeclared attributeId, firing TWO extra "not declared in
+  // attributeIds" errors that have nothing to do with the rule under test.
+  // The original (fixed) versions of these tests only asserted a substring
+  // match, so they passed anyway while quietly failing to isolate the rule
+  // they claimed to test -- see the exact-array assertions below, and the
+  // "does not isolate the rule under test" describe block further down for
+  // a reproduction using the *unmodified* fixture.
   it("refuses a continuous SMV as an attribute", () => {
-    const mutated = makeQMatrix({ attributeIds: ["attr-equivalence", "smv-theta"] });
+    const mutated = makeQMatrix({ attributeIds: ["attr-equivalence", "smv-theta"], entries: [] });
     const errors = qMatrixErrors(mutated);
-    expect(errors.join(" ")).toMatch(/Q-matrix attributes must be binary/);
+    expect(errors).toEqual([
+      "attributeIds[1] ('smv-theta') is a 'continuous' Student Model Variable. Q-matrix attributes must be binary.",
+    ]);
   });
 
   it("rejects an attributeId that does not exist on the competency model", () => {
-    const mutated = makeQMatrix({ attributeIds: ["attr-equivalence", "attr-does-not-exist"] });
+    const mutated = makeQMatrix({ attributeIds: ["attr-equivalence", "attr-does-not-exist"], entries: [] });
     const errors = qMatrixErrors(mutated);
-    expect(errors.join(" ")).toMatch(/does not exist on competency model/);
+    expect(errors).toEqual([
+      "attributeIds[1] names 'attr-does-not-exist', which does not exist on competency model 'cm1'.",
+    ]);
   });
 
   it("rejects duplicate attributeIds", () => {
-    const mutated = makeQMatrix({ attributeIds: ["attr-equivalence", "attr-equivalence"] });
+    const mutated = makeQMatrix({ attributeIds: ["attr-equivalence", "attr-equivalence"], entries: [] });
     const errors = qMatrixErrors(mutated);
-    expect(errors.join(" ")).toMatch(/Duplicate attributeIds entry/);
+    expect(errors).toEqual(["Duplicate attributeIds entry 'attr-equivalence'."]);
   });
 
   it("rejects an entry referencing an undeclared attributeId", () => {
@@ -143,6 +158,102 @@ describe("qMatrixModels — deliberate mutations", () => {
     const mutated = makeQMatrix({ status: "confirmed", locked: false });
     const errors = qMatrixErrors(mutated);
     expect(errors.join(" ")).toMatch(/Confirmed Q-matrix models must be locked/);
+  });
+
+  it("requires a competencyModelId", () => {
+    const mutated = makeQMatrix({ competencyModelId: undefined });
+    const errors = qMatrixErrors(mutated);
+    expect(errors.join(" ")).toMatch(/competencyModelId is required/);
+  });
+
+  it("requires a status", () => {
+    const mutated = makeQMatrix({ status: undefined });
+    const errors = qMatrixErrors(mutated);
+    expect(errors.join(" ")).toMatch(/status is required/);
+  });
+
+  it("rejects a status value outside the lifecycle STATUS enum", () => {
+    const mutated = makeQMatrix({ status: "bogus" });
+    const errors = qMatrixErrors(mutated);
+    expect(errors.join(" ")).toMatch(/Invalid Q-matrix status 'bogus'/);
+  });
+
+  it("rejects attributeIds that is not an array", () => {
+    const mutated = makeQMatrix({ attributeIds: "attr-equivalence", entries: [] });
+    const errors = qMatrixErrors(mutated);
+    expect(errors.join(" ")).toMatch(/attributeIds should be array/);
+  });
+
+  it("rejects entries that is not an array", () => {
+    const mutated = makeQMatrix({ entries: "not-an-array" });
+    const errors = qMatrixErrors(mutated);
+    expect(errors.join(" ")).toMatch(/entries should be array/);
+  });
+
+  it("rejects an entry missing attributeId", () => {
+    const mutated = makeQMatrix({ entries: [{ itemId: "i1" }] });
+    const errors = qMatrixErrors(mutated);
+    expect(errors).toEqual(["entries[0] requires both itemId and attributeId."]);
+  });
+
+  it("rejects an entry missing itemId", () => {
+    const mutated = makeQMatrix({ entries: [{ attributeId: "attr-equivalence" }] });
+    const errors = qMatrixErrors(mutated);
+    expect(errors).toEqual(["entries[0] requires both itemId and attributeId."]);
+  });
+
+  it("rejects a null entry in entries[] rather than throwing", () => {
+    const mutated = makeQMatrix({ entries: [null] });
+    const errors = qMatrixErrors(mutated);
+    expect(errors).toEqual(["entries[0] requires both itemId and attributeId."]);
+  });
+
+  it("rejects an entry.itemId that is null rather than merely absent", () => {
+    const mutated = makeQMatrix({ entries: [{ itemId: null, attributeId: "attr-equivalence" }] });
+    const errors = qMatrixErrors(mutated);
+    expect(errors).toEqual(["entries[0] requires both itemId and attributeId."]);
+  });
+
+  it("rejects entry.required when it is a non-boolean truthy value", () => {
+    const mutated = makeQMatrix({
+      entries: [{ itemId: "i1", attributeId: "attr-equivalence", required: "yes" }],
+    });
+    const errors = qMatrixErrors(mutated);
+    expect(errors).toEqual(["entries[0].required should be boolean"]);
+  });
+
+  it("still evaluates an attributeIds entry that is not a string (no crash, reports it by String() identity)", () => {
+    const mutated = makeQMatrix({ attributeIds: [42], entries: [] });
+    const errors = qMatrixErrors(mutated);
+    expect(errors).toEqual([
+      "attributeIds[0] names '42', which does not exist on competency model 'cm1'.",
+    ]);
+  });
+});
+
+// The three attributeIds-mutation tests above were originally written
+// against the UNMODIFIED fixture (entries left as the default three
+// entries, two of which reference "attr-simplification"). Reproduced here
+// to document, on the record, that the original assertions -- a substring
+// `.toMatch()` on the joined error string -- passed *despite* two
+// unrelated "not declared in attributeIds" errors being present, because
+// they never asserted the errors array was exactly what the test claimed
+// to isolate. This describe block exists so a future change that
+// re-introduces that non-isolation (e.g. reverting the `entries: []` fix
+// above) is caught by an exact-count assertion rather than silently
+// tolerated again.
+describe("qMatrixModels — attributeIds mutations must not silently drag in entries[] noise", () => {
+  it("removing a declared attributeId that live entries still reference produces BOTH the target error and referential-integrity noise", () => {
+    const mutated = makeQMatrix({ attributeIds: ["attr-equivalence", "smv-theta"] });
+    const errors = qMatrixErrors(mutated);
+    expect(errors).toHaveLength(3);
+    expect(errors).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/Q-matrix attributes must be binary/),
+        "entries[1] references attributeId 'attr-simplification', which is not declared in attributeIds.",
+        "entries[2] references attributeId 'attr-simplification', which is not declared in attributeIds.",
+      ])
+    );
   });
 });
 

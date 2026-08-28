@@ -186,4 +186,110 @@ describe("assemblyModels — deliberate mutations", () => {
     const errors = assemblyErrors(mutated);
     expect(errors.join(" ")).toMatch(/Confirmed assembly models must be locked/);
   });
+
+  it("requires a name", () => {
+    const mutated = makeAssemblyModel({ name: undefined });
+    const errors = assemblyErrors(mutated);
+    expect(errors.join(" ")).toMatch(/Assembly model name is required/);
+  });
+
+  it("requires a status", () => {
+    const mutated = makeAssemblyModel({ status: undefined });
+    const errors = assemblyErrors(mutated);
+    expect(errors.join(" ")).toMatch(/status is required/);
+  });
+
+  it("rejects a non-array targetsBySMV", () => {
+    const mutated = makeAssemblyModel({ targetsBySMV: "smv-theta" });
+    const errors = assemblyErrors(mutated);
+    expect(errors.join(" ")).toMatch(/targetsBySMV should be array/);
+  });
+
+  it("accepts an empty targetsBySMV array at the structural level (completeness is a lifecycle-time concern, not structural)", () => {
+    // validateAssemblyModelLifecycle (server/utils/lifecycleValidation.js)
+    // requires at least one target before "reviewed"; validateEntity here
+    // does not tie targetsBySMV completeness to status at all -- an empty
+    // array is structurally well-formed at any status, including "reviewed".
+    expect(
+      assemblyErrors(makeAssemblyModel({ status: "reviewed", targetsBySMV: [] }))
+    ).toEqual([]);
+  });
+
+  it("rejects a targetsBySMV entry with no smvId", () => {
+    const mutated = makeAssemblyModel({
+      targetsBySMV: [{ requiredSEM: 0.3 }],
+    });
+    const errors = assemblyErrors(mutated);
+    expect(errors.join(" ")).toMatch(/targetsBySMV\[0\] requires an smvId/);
+  });
+
+  it("rejects a target specifying neither requiredSEM nor requiredClassificationAccuracy", () => {
+    const mutated = makeAssemblyModel({
+      targetsBySMV: [{ smvId: "smv-theta" }],
+    });
+    const errors = assemblyErrors(mutated);
+    expect(errors.join(" ")).toMatch(/exactly one of requiredSEM or requiredClassificationAccuracy/);
+  });
+
+  it("rejects requiredSEM at the zero boundary (must be strictly greater than 0)", () => {
+    const mutated = makeAssemblyModel({
+      targetsBySMV: [{ smvId: "smv-theta", requiredSEM: 0 }],
+    });
+    const errors = assemblyErrors(mutated);
+    expect(errors.join(" ")).toMatch(/requiredSEM must be greater than 0/);
+  });
+
+  it("rejects requiredClassificationAccuracy at the zero boundary (must be > 0)", () => {
+    const mutated = makeAssemblyModel({
+      targetsBySMV: [{ smvId: "smv-fractions", requiredClassificationAccuracy: 0 }],
+    });
+    const errors = assemblyErrors(mutated);
+    expect(errors.join(" ")).toMatch(/requiredClassificationAccuracy must be in \(0, 1\]/);
+  });
+
+  it("accepts requiredClassificationAccuracy at the 1 boundary (inclusive upper bound)", () => {
+    const mutated = makeAssemblyModel({
+      targetsBySMV: [{ smvId: "smv-fractions", requiredClassificationAccuracy: 1 }],
+    });
+    expect(assemblyErrors(mutated)).toEqual([]);
+  });
+
+  it("rejects a non-object, non-array stoppingRules", () => {
+    const mutated = makeAssemblyModel({ stoppingRules: "fast" });
+    const errors = assemblyErrors(mutated);
+    expect(errors.join(" ")).toMatch(/stoppingRules should be object/);
+  });
+
+  it("rejects an array stoppingRules (Array.isArray is checked explicitly, not just typeof)", () => {
+    const mutated = makeAssemblyModel({ stoppingRules: [20, 5] });
+    const errors = assemblyErrors(mutated);
+    expect(errors.join(" ")).toMatch(/stoppingRules should be object/);
+  });
+
+  it("rejects stoppingRules.maxItems that is not a positive number", () => {
+    const mutated = makeAssemblyModel({ stoppingRules: { maxItems: 0 } });
+    const errors = assemblyErrors(mutated);
+    expect(errors.join(" ")).toMatch(/stoppingRules\.maxItems must be a positive number/);
+  });
+
+  it("rejects stoppingRules.minItems that is not a positive number", () => {
+    const mutated = makeAssemblyModel({ stoppingRules: { minItems: -1 } });
+    const errors = assemblyErrors(mutated);
+    expect(errors.join(" ")).toMatch(/stoppingRules\.minItems must be a positive number/);
+  });
+
+  it("rejects a non-boolean stoppingRules.targetsMet", () => {
+    const mutated = makeAssemblyModel({ stoppingRules: { targetsMet: "yes" } });
+    const errors = assemblyErrors(mutated);
+    expect(errors.join(" ")).toMatch(/stoppingRules\.targetsMet should be boolean/);
+  });
+
+  it("rejects a selectionAlgorithm object that is missing policyId (distinct from selectionAlgorithm being absent entirely)", () => {
+    const mutated = makeAssemblyModel({ selectionAlgorithm: {} });
+    const errors = assemblyErrors(mutated);
+    expect(errors.join(" ")).toMatch(/selectionAlgorithm\.policyId is required/);
+    // And NOT the "is required and must reference a policyId" message, which
+    // is specific to selectionAlgorithm itself being missing/non-object.
+    expect(errors.join(" ")).not.toMatch(/selectionAlgorithm is required and must reference/);
+  });
 });

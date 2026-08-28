@@ -103,6 +103,144 @@ describe("compositeLibrary — deliberate mutations", () => {
   });
 });
 
+// The "requires taskModelId" / "rejects a dangling taskModelId" mutations
+// above reuse `makeLibrary()`'s default `items` (both pointing at "tm1"),
+// so mutating taskModelId ALSO makes every item entry disagree with the
+// library's (now different/missing) taskModelId and fire the
+// "belongs to taskModelId ... not this library's ..." rule too. The
+// `.toMatch()` assertions above still pass because they only check that
+// the expected substring is present, not that it's the ONLY error — so
+// they don't actually prove the taskModelId checks are isolated from the
+// items[] cross-check. These fixtures strip `items` to confirm each rule
+// really does fire alone.
+describe("compositeLibrary — rule isolation (items[] cascade)", () => {
+  it("requires taskModelId, and ONLY that, when items[] is empty", () => {
+    const errors = libraryErrors(makeLibrary({ taskModelId: undefined, items: [] }));
+    expect(errors).toEqual(["taskModelId is required."]);
+  });
+
+  it("flags a dangling taskModelId, and ONLY that, when items[] is empty", () => {
+    const errors = libraryErrors(makeLibrary({ taskModelId: "tm-does-not-exist", items: [] }));
+    expect(errors).toEqual(["Invalid taskModelId: tm-does-not-exist"]);
+  });
+
+  it("demonstrates the cascade the two tests above don't isolate against", () => {
+    // Same mutation as "requires taskModelId", but keeping the default
+    // items[] (which reference tm1). Documents that clearing taskModelId
+    // does NOT just produce one error against this fixture.
+    const errors = libraryErrors(makeLibrary({ taskModelId: undefined }));
+    expect(errors).toEqual(
+      expect.arrayContaining([
+        "taskModelId is required.",
+        expect.stringMatching(/belongs to taskModelId 'tm1', not this library's 'undefined'/),
+      ])
+    );
+    expect(errors.length).toBeGreaterThan(1);
+  });
+});
+
+describe("compositeLibrary — items[] structural edge cases", () => {
+  it("rejects a non-array items value", () => {
+    const errors = libraryErrors(makeLibrary({ items: "not-an-array" }));
+    expect(errors.join(" ")).toMatch(/items should be array/);
+  });
+
+  it("treats items[] as optional: omitting it entirely is valid", () => {
+    const lib = makeLibrary();
+    delete lib.items;
+    expect(libraryErrors(lib)).toEqual([]);
+  });
+
+  it("treats an empty items[] array as valid", () => {
+    expect(libraryErrors(makeLibrary({ items: [] }))).toEqual([]);
+  });
+
+  it("rejects an items[] entry that is null", () => {
+    const errors = libraryErrors(makeLibrary({ items: [null] }));
+    expect(errors.join(" ")).toMatch(/items\[0\] requires an itemId/);
+  });
+
+  it("rejects an items[] entry that is not an object (e.g. a bare itemId string)", () => {
+    const errors = libraryErrors(makeLibrary({ items: ["i1"] }));
+    expect(errors.join(" ")).toMatch(/items\[0\] requires an itemId/);
+  });
+
+  it("rejects an items[] entry that is an object missing itemId", () => {
+    const errors = libraryErrors(makeLibrary({ items: [{}] }));
+    expect(errors.join(" ")).toMatch(/items\[0\] requires an itemId/);
+  });
+
+  it("does NOT reject duplicate itemId entries within items[] (no dedup rule exists)", () => {
+    // Documents current permissive behavior. If a dedup rule is ever added
+    // deliberately, update this test rather than treating its failure as a
+    // regression.
+    const errors = libraryErrors(makeLibrary({ items: [{ itemId: "i1" }, { itemId: "i1" }] }));
+    expect(errors).toEqual([]);
+  });
+});
+
+describe("compositeLibrary — taskModelVersion numeric edge cases", () => {
+  it("accepts taskModelVersion 0 (falsy but numerically valid)", () => {
+    expect(libraryErrors(makeLibrary({ taskModelVersion: 0 }))).toEqual([]);
+  });
+
+  it("does not reject a negative taskModelVersion (no range check exists)", () => {
+    expect(libraryErrors(makeLibrary({ taskModelVersion: -1 }))).toEqual([]);
+  });
+
+  it("reports taskModelVersion twice when it is present but the wrong type", () => {
+    // The generic per-field type loop (schema.js's plain-shape pass) and
+    // the compositeLibrary-specific block both independently check
+    // taskModelVersion's type, so a present-but-wrong-type value produces
+    // two distinct error strings rather than one. Documented here so a
+    // future dedup of that redundancy is a deliberate choice, not a
+    // silent behavior change this suite fails to notice.
+    const errors = libraryErrors(makeLibrary({ taskModelVersion: "1" }));
+    expect(errors).toEqual(
+      expect.arrayContaining([
+        "taskModelVersion should be number",
+        "taskModelVersion is required and must be a number.",
+      ])
+    );
+  });
+});
+
+describe("compositeLibrary — compiledAt format", () => {
+  it("flags a present but unparseable compiledAt as an invalid date, not as missing", () => {
+    // `!obj.compiledAt` is false for a non-empty (if garbage) string, so the
+    // compositeLibrary-specific "compiledAt is required" branch does not
+    // fire here -- it's the generic per-field 'date' type check that
+    // catches this, with a different message.
+    const errors = libraryErrors(makeLibrary({ compiledAt: "not-a-date" }));
+    expect(errors).toEqual(["compiledAt should be date"]);
+  });
+});
+
+describe("compositeLibrary — validating without a db", () => {
+  it("degrades gracefully (no crash, no referential-integrity errors) when db is omitted", () => {
+    // Every db-dependent check in the compositeLibrary block is guarded by
+    // `db && ...`, so calling validateEntity with no db must not throw and
+    // must skip taskModelId/itemId/active-uniqueness referential checks
+    // rather than crashing on `db.taskModels` of null.
+    expect(() => validateEntity("compositeLibrary", makeLibrary(), null)).not.toThrow();
+    const { valid, errors } = validateEntity("compositeLibrary", makeLibrary(), null);
+    expect(valid).toBe(true);
+    expect(errors).toEqual([]);
+  });
+
+  it("still catches non-db-dependent structural errors when db is omitted", () => {
+    const { errors } = validateEntity("compositeLibrary", makeLibrary({ taskModelId: undefined, items: [] }), null);
+    expect(errors).toEqual(["taskModelId is required."]);
+  });
+});
+
+describe("compositeLibrary — active field type", () => {
+  it("rejects a non-boolean active value", () => {
+    const errors = libraryErrors(makeLibrary({ active: "yes" }));
+    expect(errors.join(" ")).toMatch(/active should be boolean/);
+  });
+});
+
 describe("evidenceModels.statisticalModels[].parameterSets[] — provenance", () => {
   const db = { competencies: [{ id: "c1", modelId: "cm1", variableType: "continuous" }] };
 

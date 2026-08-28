@@ -114,6 +114,22 @@ describe("validateAssemblyModelLifecycle", () => {
     expect(errors.join(" ")).toMatch(/does not match the competency model's current version/);
   });
 
+  it("refuses activation when competencyModelId points at no competency model at all (not merely a non-operational one)", () => {
+    const errors = validateAssemblyModelLifecycle(
+      makeAssemblyModel({ status: "operational", locked: true, competencyModelId: "cm-ghost" }),
+      db
+    );
+    expect(errors.join(" ")).toMatch(/competency model 'cm-ghost' not found/);
+  });
+
+  it("requires at least one SMV accuracy target before review, even when targetsBySMV is an empty array rather than missing", () => {
+    const errors = validateAssemblyModelLifecycle(
+      makeAssemblyModel({ status: "reviewed", targetsBySMV: [] }),
+      db
+    );
+    expect(errors.join(" ")).toMatch(/at least one SMV accuracy target before review/);
+  });
+
   it("refuses an illegal status transition (draft -> operational, skipping the matrix)", () => {
     const existing = makeAssemblyModel({ status: "draft" });
     const dbWithExisting = { ...db, assemblyModels: [existing] };
@@ -169,5 +185,44 @@ describe("validateQMatrixModelLifecycle", () => {
     const dbWithExisting = { ...db, qMatrixModels: [existing] };
     const errors = validateQMatrixModelLifecycle(makeQMatrix({ status: "draft" }), dbWithExisting);
     expect(errors.join(" ")).toMatch(/Illegal Q-matrix status transition: 'confirmed' -> 'draft'/);
+  });
+
+  it("allows the legal draft -> reviewed transition", () => {
+    const existing = makeQMatrix({ status: "draft" });
+    const dbWithExisting = { ...db, qMatrixModels: [existing] };
+    const errors = validateQMatrixModelLifecycle(makeQMatrix({ status: "reviewed" }), dbWithExisting);
+    expect(errors).toEqual([]);
+  });
+
+  it("refuses activation on a competencyModelVersion mismatch", () => {
+    const errors = validateQMatrixModelLifecycle(
+      makeQMatrix({ status: "operational", locked: true, competencyModelVersion: 1 }),
+      db
+    );
+    expect(errors.join(" ")).toMatch(/does not match the competency model's current version/);
+  });
+
+  it("refuses activation when the bound competency model does not exist", () => {
+    const errors = validateQMatrixModelLifecycle(
+      makeQMatrix({ status: "operational", locked: true, competencyModelId: "cm-does-not-exist" }),
+      db
+    );
+    expect(errors.join(" ")).toMatch(/competency model 'cm-does-not-exist' not found/);
+  });
+
+  it("treats an explicitly empty attributeIds[] the same as a missing one before review", () => {
+    const errors = validateQMatrixModelLifecycle(
+      { id: "qm-new", status: "reviewed", name: "Q", competencyModelId: "cm1", attributeIds: [] },
+      db
+    );
+    expect(errors.join(" ")).toMatch(/at least one attribute before review/);
+  });
+
+  it("treats a wholly-absent entries field the same as an empty array before confirmation", () => {
+    const errors = validateQMatrixModelLifecycle(
+      makeQMatrix({ status: "confirmed", locked: true, entries: undefined }),
+      db
+    );
+    expect(errors.join(" ")).toMatch(/at least one item-attribute entry before confirmation/);
   });
 });
