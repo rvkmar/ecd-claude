@@ -2737,6 +2737,28 @@ export function validateEntity(collection, obj, db = null, options = {}) {
           }
         });
 
+        // Day 27: two rules with byte-identical responsePatterns are
+        // unambiguously an authoring mistake -- whichever is declared
+        // first silently shadows the other at delivery time (Evidence
+        // Identification matches the first entry whose pattern fits, see
+        // server/delivery/evidenceIdentification.js), and nothing warns
+        // the author their second rule can never fire. This catches only
+        // EXACT duplicates, not general semantic overlap (e.g. one pattern
+        // whose array-valued key is a superset of another's) -- detecting
+        // that in general needs the pattern's array/membership semantics,
+        // which is a fuzzier problem deliberately left for a future pass.
+        const seenPatterns = new Set();
+        obj.scoring.evidenceActivationMap.forEach((map, i) => {
+          if (!map.responsePattern || typeof map.responsePattern !== "object") return;
+          const key = JSON.stringify(map.responsePattern);
+          if (seenPatterns.has(key)) {
+            errors.push(
+              `Activation rule ${i + 1} has the exact same responsePattern as an earlier rule; the earlier rule always wins and this one can never fire.`
+            );
+          }
+          seenPatterns.add(key);
+        });
+
         const maxRuleScore = obj.scoring.evidenceActivationMap.reduce(
           (acc, m) => Math.max(acc, typeof m.score === "number" ? m.score : 0),
           0

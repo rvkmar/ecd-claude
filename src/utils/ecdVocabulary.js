@@ -263,19 +263,45 @@ export function responsePatternFields(method) {
 }
 
 /* True when the pattern has at least one of the fields its method
-   declares filled in. An empty `{}` is not a condition -- it matches
-   everything and nothing, and used to sail through validation because
-   `{}` is truthy. */
-export function responsePatternIsSpecified(method, pattern) {
-  const fields = responsePatternFields(method);
-  if (fields.length === 0) return true;
-  if (!pattern || typeof pattern !== "object") return false;
+   declares filled in, OR -- Day 27 -- at least one genuinely non-empty
+   key/value pair of any name at all.
 
-  return fields.some((f) => {
+   The second clause exists because two subsystems built against this same
+   field independently settled on different shapes: the Item Wizard's
+   EvidenceActivationEditor renders inputs FROM this table (so a
+   `dichotomous` rule it authors really does write `{equalsCorrect:
+   boolean}`), while server/delivery/evidenceIdentification.js -- the thing
+   that actually EVALUATES a responsePattern against a real work product --
+   matches raw response-value keys directly (`{selected: "opt_a"}`, the
+   shape the repo's own worked example, samples/sample-items.json, uses).
+   Before this fix, an item authored with that raw-response shape could
+   never be confirmed: this function returned false for it, since
+   `equalsCorrect` was absent. An abstract summary key like `equalsCorrect`
+   is itself never present on a real work product either, so treating it as
+   the ONLY valid shape would have made every dichotomous item
+   unconfirmable in practice once evidenceIdentification.js actually needed
+   to consume it. Both shapes are accepted here rather than picking one and
+   breaking the other's confirmed items retroactively.
+
+   An empty `{}` is not a condition either way -- it matches everything and
+   nothing, and used to sail through validation because `{}` is truthy. */
+export function responsePatternIsSpecified(method, pattern) {
+  if (!pattern || typeof pattern !== "object" || Array.isArray(pattern)) return false;
+
+  const fields = responsePatternFields(method);
+
+  if (fields.some((f) => {
     const v = pattern[f.key];
     if (f.type === "boolean") return typeof v === "boolean";
     if (f.type === "number") return typeof v === "number" && Number.isFinite(v);
     return String(v ?? "").trim().length > 0;
+  })) {
+    return true;
+  }
+
+  return Object.values(pattern).some((v) => {
+    if (Array.isArray(v)) return v.length > 0;
+    return v !== undefined && v !== null && String(v).trim().length > 0;
   });
 }
 

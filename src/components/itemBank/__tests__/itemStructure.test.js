@@ -182,6 +182,22 @@ describe("ecdVocabulary", () => {
     expect(responsePatternIsSpecified("weighted_sum", { minScore: 2 })).toBe(true);
     expect(responsePatternIsSpecified("weighted_sum", { minScore: null })).toBe(false);
   });
+
+  // Day 27: reconciles the Wizard-authored descriptor shape (equalsCorrect
+  // etc.) with the raw-response shape server/delivery/evidenceIdentification.js
+  // actually matches against a work product (e.g. `{ selected: "opt_a" }`,
+  // the shape samples/sample-items.json uses) -- before this fix, an item
+  // using that shape could never be confirmed, since `equalsCorrect` was
+  // absent and nothing else counted as "specified".
+  it("also treats a raw-response-shaped pattern (not the descriptor's own field) as specified", () => {
+    expect(responsePatternIsSpecified("dichotomous", { selected: "opt_a" })).toBe(true);
+    expect(responsePatternIsSpecified("dichotomous", { selected: ["opt_b", "opt_c"] })).toBe(true);
+    expect(responsePatternIsSpecified("dichotomous", { selected: "" })).toBe(false);
+    expect(responsePatternIsSpecified("dichotomous", { selected: [] })).toBe(false);
+    // Still rejects a genuinely empty pattern either way.
+    expect(responsePatternIsSpecified("dichotomous", {})).toBe(false);
+    expect(responsePatternIsSpecified("dichotomous", null)).toBe(false);
+  });
 });
 
 /* ------------------------------------------------------ draft shape */
