@@ -3,7 +3,18 @@ import { authenticateToken, authorizeRole } from "../utils/authMiddleware.js";
 import { loadDB, saveDB, finishSession } from "../../src/utils/db-server.js";
 import { validateEntity } from "../../src/utils/schema.js";
 import { SESSION_STATUS } from "../../src/utils/sessionStatus.js";
+import { identifyEvidence } from "../delivery/evidenceIdentification.js";
 import { log2 } from "mathjs"; // if not available, define inline
+
+// Day 28 (Week 6): a session scores through an authored Evidence Model,
+// via server/delivery/evidenceIdentification.js, when the client opts in
+// by sending `itemId` instead of `questionId` on /submit. The legacy
+// db.questions path below this flag is completely UNCHANGED -- this is a
+// rollback lever, not a migration switch: SessionPlayer.jsx does not send
+// `itemId` yet (a separate, later task), so this defaults to true with
+// zero effect on real traffic today, and can be forced off in production
+// if the new path misbehaves, for one release, per the plan.
+const ITEM_DELIVERY_ENABLED = process.env.ITEM_DELIVERY_ENABLED !== "false";
 
 function entropy(p) {
   if (p <= 0 || p >= 1) return 0;
@@ -149,10 +160,10 @@ router.get("/:id", (req, res) => {
 // ------------------------------
 // POST /api/sessions/:id/submit
 // ------------------------------
-// body: { taskId, questionId?, rawAnswer, observationId?, scoredValue?, evidenceId?, rubricLevel? }
+// body: { taskId, questionId?, itemId?, rawAnswer, observationId?, scoredValue?, evidenceId?, rubricLevel? }
 router.post("/:id/submit", async (req, res) => {
   const { id } = req.params;
-  const { taskId, questionId, rawAnswer, observationId, scoredValue, evidenceId, rubricLevel } = req.body;
+  const { taskId, questionId, itemId, rawAnswer, observationId, scoredValue, evidenceId, rubricLevel } = req.body;
 
   const db = loadDB();
   const session = db.sessions.find(s => s.id === id && !s.isCompleted);
@@ -162,8 +173,91 @@ router.post("/:id/submit", async (req, res) => {
     return res.status(400).json({ error: `Task ${taskId} not part of this session` });
   }
 
-  // 🔹 Validation: observationId & evidenceId
   const task = db.tasks.find(t => t.id === taskId);
+
+  // 🔹 Day 28: item-based delivery, scoring through an authored Evidence
+  // Model via identifyEvidence() -- an Observable Variable value, not a
+  // score. Opt in per-request with `itemId` instead of `questionId`;
+  // everything below this block (the legacy db.questions path) is
+  // untouched and still runs exactly as before for a `questionId` request.
+  // Deliberately narrow: only /submit is wired today (the exit check is
+  // about scoring). /next-task's item-based selection is a separate,
+  // larger Activity Selection undertaking, not attempted here.
+  if (ITEM_DELIVERY_ENABLED && itemId) {
+    const item = db.items?.find(it => it.id === itemId);
+    if (!item) {
+      return res.status(400).json({ error: `Invalid itemId: ${itemId}` });
+    }
+
+    // src/utils/schema.js's `collection === "sessions"` validation (a
+    // pre-existing contract this route never previously had a caller for)
+    // requires every response, once a session is live, to carry calibration
+    // provenance: which Evidence Model + version, and which calibrated
+    // parameterSet was active when the response was scored -- a pointer,
+    // never a cached parameter value, matching ADR 0003's "resolve live"
+    // boundary. An Evidence Model with no active calibrated parameterSet
+    // yet genuinely cannot deliver -- surfaced here as a clear, specific
+    // error rather than a confusing generic schema-validation failure.
+    const evidenceModelRecord = db.evidenceModels?.find(em => em.id === item.evidenceModelId);
+    const activeStatModel = evidenceModelRecord?.statisticalModels?.find(sm => sm.active);
+    const parameterSetId = activeStatModel?.activeParameterSetId;
+
+    if (!evidenceModelRecord) {
+      return res.status(400).json({ error: `Item '${itemId}' references unknown evidenceModelId '${item.evidenceModelId}'.` });
+    }
+    if (!parameterSetId) {
+      return res.status(400).json({
+        error: `Evidence model '${item.evidenceModelId}' has no active calibrated parameter set yet; item '${itemId}' cannot be scored through it.`,
+      });
+    }
+
+    // A structured work product is passed through as-is; a bare scalar
+    // (the common case -- an option id, a numeric value) is wrapped into
+    // the `{ selected: ... }` shape identifyEvidence's matching expects,
+    // matching the repo's own worked example (samples/sample-items.json).
+    const workProduct =
+      rawAnswer && typeof rawAnswer === "object" ? rawAnswer : { selected: rawAnswer };
+
+    const evidence = identifyEvidence(workProduct, item, db);
+
+    const response = {
+      taskId,
+      itemId,
+      itemVersion: item.versionNumber,
+      taskModelVersion: item.taskModelVersion,
+      evidenceModelId: item.evidenceModelId,
+      evidenceModelVersion: evidenceModelRecord.versionNumber,
+      parameterSetId,
+      rawAnswer: rawAnswer ?? null,
+      observationId: evidence.observationId,
+      observableId: evidence.observableId,
+      activated: evidence.activated,
+      direction: evidence.direction,
+      strength: evidence.strength,
+      rationale: evidence.rationale,
+      timestamp: new Date().toISOString(),
+    };
+    if (evidence.warning) response.warning = evidence.warning;
+
+    session.responses.push(response);
+    session.currentTaskIndex = Math.min(session.currentTaskIndex + 1, session.taskIds.length);
+    session.updatedAt = new Date().toISOString();
+
+    if (evidence.observationId && !task.generatedObservationIds.includes(evidence.observationId)) {
+      task.generatedObservationIds.push(evidence.observationId);
+    }
+    task.updatedAt = new Date().toISOString();
+
+    const { valid, errors } = validateEntity("sessions", session, db);
+    if (!valid) {
+      return res.status(400).json({ error: "Schema validation failed", details: errors });
+    }
+
+    saveDB(db);
+    return res.json(session);
+  }
+
+  // 🔹 Validation: observationId & evidenceId
   const taskModel = db.taskModels.find(tm => tm.id === task.taskModelId);
 
   let validObs = new Map();

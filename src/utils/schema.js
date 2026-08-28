@@ -3657,6 +3657,18 @@ export function validateEntity(collection, obj, db = null, options = {}) {
 
       for (const r of obj.responses || []) {
 
+        // Day 28: this whole block -- evidenceModelId/parameterSetId/
+        // version provenance -- only ever meant anything for item-based
+        // responses (it reads `db.items`, `r.itemVersion`,
+        // `r.taskModelVersion` right above). It was written with no caller
+        // that ever produced an item-based response, and NO scoping
+        // condition of its own, so it ran unconditionally for every
+        // response including the pre-existing legacy db.questions shape --
+        // which never had an `evidenceModelId` field at all. That silently
+        // broke every /submit call once a session reached "in_progress",
+        // for every session, with zero test coverage to catch it. Now
+        // correctly scoped to `r.itemId` responses only, matching the
+        // version checks it already sits beside.
         if (r.itemId) {
 
           const item = db.items?.find(i => i.id === r.itemId);
@@ -3671,61 +3683,61 @@ export function validateEntity(collection, obj, db = null, options = {}) {
               errors.push("Session taskModelVersion mismatch.");
             }
           }
-        }
 
-        if (!r.evidenceModelId) {
-          errors.push("Session response missing evidenceModelId.");
-          continue;
-        }
+          if (!r.evidenceModelId) {
+            errors.push("Session response missing evidenceModelId.");
+            continue;
+          }
 
-        const evidence = db.evidenceModels?.find(
-          em => em.id === r.evidenceModelId
-        );
-
-        if (!evidence) {
-          errors.push(`Invalid evidenceModelId in session: ${r.evidenceModelId}`);
-          continue;
-        }
-
-        if (!r.parameterSetId) {
-          errors.push(
-            `Session response for evidence ${r.evidenceModelId} missing parameterSetId.`
-          );
-        } else {
-          const sm = evidence.statisticalModels?.find(
-            sm => sm.active
+          const evidence = db.evidenceModels?.find(
+            em => em.id === r.evidenceModelId
           );
 
-          if (!sm || sm.activeParameterSetId !== r.parameterSetId) {
+          if (!evidence) {
+            errors.push(`Invalid evidenceModelId in session: ${r.evidenceModelId}`);
+            continue;
+          }
+
+          if (!r.parameterSetId) {
             errors.push(
-              `Session response parameterSetId mismatch for evidence ${r.evidenceModelId}.`
+              `Session response for evidence ${r.evidenceModelId} missing parameterSetId.`
+            );
+          } else {
+            const sm = evidence.statisticalModels?.find(
+              sm => sm.active
+            );
+
+            if (!sm || sm.activeParameterSetId !== r.parameterSetId) {
+              errors.push(
+                `Session response parameterSetId mismatch for evidence ${r.evidenceModelId}.`
+              );
+            }
+          }
+
+          const competency = db.competencies?.find(
+            c => c.id === evidence.competencyId
+          );
+
+          if (competency) {
+            const model = db.competencyModels?.find(
+              m => m.id === competency.modelId
+            );
+
+            if (
+              model &&
+              evidence.competencyModelVersion !== model.versionNumber
+            ) {
+              errors.push(
+                `Session evidence ${r.evidenceModelId} is bound to outdated competency model version.`
+              );
+            }
+          }
+
+          if (r.evidenceModelVersion !== evidence.versionNumber) {
+            errors.push(
+              `Session evidenceModelVersion mismatch for evidence ${r.evidenceModelId}.`
             );
           }
-        }
-
-        const competency = db.competencies?.find(
-          c => c.id === evidence.competencyId
-        );
-
-        if (competency) {
-          const model = db.competencyModels?.find(
-            m => m.id === competency.modelId
-          );
-
-          if (
-            model &&
-            evidence.competencyModelVersion !== model.versionNumber
-          ) {
-            errors.push(
-              `Session evidence ${r.evidenceModelId} is bound to outdated competency model version.`
-            );
-          }
-        }
-
-        if (r.evidenceModelVersion !== evidence.versionNumber) {
-          errors.push(
-            `Session evidenceModelVersion mismatch for evidence ${r.evidenceModelId}.`
-          );
         }
       }
     }
