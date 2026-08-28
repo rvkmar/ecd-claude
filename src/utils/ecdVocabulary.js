@@ -269,3 +269,167 @@ export function responsePatternIsSpecified(method, pattern) {
     return String(v ?? "").trim().length > 0;
   });
 }
+
+/* =====================================================
+   6. Student Model Variables (competency-model level)
+   -----------------------------------------------------
+   A DINA/G-DINA student model IS a vector of binary SMVs, so `binary`
+   is a first-class type here alongside the traditional `continuous`
+   theta scale -- not a special case bolted on later. `ordinal` and
+   `categorical` are declared now (Day 16, Week 4 core schema) even
+   though only continuous and binary have a near-term consumer, so the
+   type enum doesn't need a breaking change when a polytomous SMV shows
+   up.
+
+   Each type only admits certain prior-distribution families -- a
+   binary attribute's prior is a probability of mastery (bernoulli/beta),
+   not a mean/sd -- so the family is validated against type here, the
+   same one-to-many compatibility shape as INTERACTION_COMPATIBILITY
+   above, not a flat shared enum.
+===================================================== */
+
+export const SM_VARIABLE_TYPES = [
+  {
+    value: "continuous",
+    label: "Continuous",
+    hint: "A latent trait on a continuous scale, e.g. IRT theta.",
+  },
+  {
+    value: "binary",
+    label: "Binary Attribute",
+    hint: "Mastery / non-mastery of a single attribute, as used by DINA/G-DINA.",
+  },
+  {
+    value: "ordinal",
+    label: "Ordinal",
+    hint: "An ordered set of proficiency levels.",
+  },
+  {
+    value: "categorical",
+    label: "Categorical",
+    hint: "An unordered set of latent classes.",
+  },
+];
+
+export const SM_VARIABLE_TYPE_VALUES = SM_VARIABLE_TYPES.map((t) => t.value);
+
+export function smVariableTypeLabel(value) {
+  return SM_VARIABLE_TYPES.find((t) => t.value === value)?.label || value || "—";
+}
+
+/* Which prior-distribution families are valid for each SMV type. */
+export const SM_VARIABLE_PRIOR_FAMILIES = {
+  continuous: ["normal", "uniform"],
+  binary: ["bernoulli", "beta"],
+  ordinal: ["dirichlet"],
+  categorical: ["dirichlet"],
+};
+
+export function priorFamiliesForSmVariableType(type) {
+  if (!type) return [];
+  return SM_VARIABLE_PRIOR_FAMILIES[type] || [];
+}
+
+export function isPriorFamilyCompatible(type, family) {
+  if (!type || !family) return false;
+  return priorFamiliesForSmVariableType(type).includes(family);
+}
+
+/* Numeric shape each prior family's `params` must satisfy. Mirrors
+   RESPONSE_PATTERN_FIELDS above: a descriptor table the validator and
+   any future editor both read, instead of two hand-kept copies. */
+export const PRIOR_DISTRIBUTION_PARAM_SPECS = {
+  normal: [
+    { key: "mean", label: "Mean" },
+    { key: "sd", label: "Standard deviation", positive: true },
+  ],
+  uniform: [
+    { key: "min", label: "Minimum" },
+    { key: "max", label: "Maximum" },
+  ],
+  bernoulli: [{ key: "p", label: "Probability of mastery", min: 0, max: 1 }],
+  beta: [
+    { key: "alpha", label: "Alpha", positive: true },
+    { key: "beta", label: "Beta", positive: true },
+  ],
+  dirichlet: [{ key: "alpha", label: "Concentration vector", isArray: true }],
+};
+
+/* True only when every declared param is present, numeric (or a numeric
+   array for dirichlet) and satisfies its own bound. A missing or
+   zero-length `params` object is not "unspecified yet" here the way an
+   empty response pattern is -- unlike interaction scoring, a prior
+   distribution is either fully specified or it cannot be sampled from,
+   so there is no lenient/draft reading of this rule. */
+export function priorDistributionParamsAreValid(family, params) {
+  const spec = PRIOR_DISTRIBUTION_PARAM_SPECS[family];
+  if (!spec) return false;
+  if (!params || typeof params !== "object") return false;
+
+  return spec.every((field) => {
+    const v = params[field.key];
+    if (field.isArray) {
+      return (
+        Array.isArray(v) &&
+        v.length > 0 &&
+        v.every((n) => typeof n === "number" && Number.isFinite(n) && n > 0)
+      );
+    }
+    if (typeof v !== "number" || !Number.isFinite(v)) return false;
+    if (field.positive && v <= 0) return false;
+    if (field.min !== undefined && v < field.min) return false;
+    if (field.max !== undefined && v > field.max) return false;
+    if (field.key === "min" && typeof params.max === "number" && v >= params.max) {
+      return false;
+    }
+    return true;
+  });
+}
+
+/* =====================================================
+   7. Declared psychological perspective (Competency Model level)
+   -----------------------------------------------------
+   Mislevy & Riconscente (2005) §2.1: the psychological perspective a
+   Competency Model is authored against "cannot be emphasized too
+   strongly", since a mismatch against the measurement model chosen
+   downstream produces a substantially less informative assessment (e.g.
+   a trait-perspective model scored with a diagnostic classification
+   model). Declared as one enum field on the Competency Model now, ahead
+   of the full Domain Analysis layer (~W23+), because it costs one field
+   and is the coherence check that catches that mismatch early.
+===================================================== */
+
+export const PSYCHOLOGICAL_PERSPECTIVES = [
+  {
+    value: "trait",
+    label: "Trait",
+    hint: "A stable, continuous latent trait -- the classical IRT/CTT view.",
+  },
+  {
+    value: "information_processing",
+    label: "Information Processing",
+    hint: "Cognitive processes and strategies, often decomposed into discrete attributes -- the usual fit for DINA/G-DINA.",
+  },
+  {
+    value: "sociocultural",
+    label: "Sociocultural",
+    hint: "Competence as situated in social/cultural practice rather than a purely individual trait.",
+  },
+  {
+    value: "developmental",
+    label: "Developmental",
+    hint: "Competence as a progression through ordered developmental stages.",
+  },
+];
+
+export const PSYCHOLOGICAL_PERSPECTIVE_VALUES = PSYCHOLOGICAL_PERSPECTIVES.map(
+  (p) => p.value
+);
+
+export function psychologicalPerspectiveLabel(value) {
+  return (
+    PSYCHOLOGICAL_PERSPECTIVES.find((p) => p.value === value)?.label ||
+    value ||
+    "—"
+  );
+}

@@ -23,6 +23,11 @@ import {
   interactionCompatibilityMessage,
   interactionTypesForObservable,
   responsePatternIsSpecified,
+  SM_VARIABLE_TYPE_VALUES,
+  isPriorFamilyCompatible,
+  priorFamiliesForSmVariableType,
+  priorDistributionParamsAreValid,
+  PSYCHOLOGICAL_PERSPECTIVE_VALUES,
 } from "./ecdVocabulary.js";
 
 // Canonical session status spellings -- see src/utils/sessionStatus.js for
@@ -162,6 +167,19 @@ export const schema = {
     locked: 'boolean',
     versionNumber: 'number',
     parentModelId: 'string',
+
+    // Student Model Variables -- see ecdVocabulary.js §6. Declared and
+    // validated as of Day 16 (Week 4 core schema); no wizard step authors
+    // this yet, so it is optional at every status, including confirmed --
+    // making it required would strand every model confirmed before the
+    // authoring UI exists. Each entry: { id, label, type, scale,
+    // priorDistribution: { family, params } }. A DINA/G-DINA student model
+    // is a vector of `binary`-type entries.
+    smVariables: 'array',
+
+    // See ecdVocabulary.js §7. Optional single enum, validated if present.
+    psychologicalPerspective: 'string',
+
     createdAt: 'date',
     updatedAt: 'date',
   },
@@ -452,6 +470,40 @@ export const schema = {
     subject: 'string',
     stage: 'string',
     curricularGoals: 'array',
+    createdAt: 'date',
+    updatedAt: 'date',
+  },
+
+  // ------------------------------------------------------------------
+  // assemblyModels — Day 17 (Week 4 core schema). Declared and validated
+  // only; not mounted, no UI, no lifecycle wiring yet (that's Day 21's
+  // "matrix entries + validateXLifecycle() for each new core collection").
+  //
+  // `{targetsBySMV: [{smvId, requiredSEM | requiredClassificationAccuracy}],
+  // stoppingRules, selectionAlgorithm}` per the build reference: an Assembly
+  // Model states, per Student Model Variable on a Competency Model, how
+  // precisely it must be estimated before a session can stop -- a standard
+  // error target for a continuous SMV, a classification-accuracy target
+  // for a binary/ordinal/categorical one (see ecdVocabulary.js SM_VARIABLE_
+  // TYPES). `selectionAlgorithm` is a POINTER to an existing `policies`
+  // record (fixed/IRT/BayesianNetwork/MarkovChain), not a duplicated copy
+  // of its `type` -- the "one pointer, validated on both sides" invariant.
+  //
+  // Declared in the plain-shape style, not the JSON-schema style `policies`
+  // uses above, for the same reason `curricularPolicies` is: the JSON-schema
+  // branch in validateEntity returns early and would never reach the deep
+  // `collection === "assemblyModels"` referential-integrity checks below.
+  // ------------------------------------------------------------------
+  assemblyModels: {
+    id: 'string',
+    name: 'string',
+    description: 'string',
+    competencyModelId: 'string',
+    competencyModelVersion: 'number',
+    targetsBySMV: 'array',
+    stoppingRules: 'object',
+    selectionAlgorithm: 'object',
+    status: 'string',
     createdAt: 'date',
     updatedAt: 'date',
   },
@@ -3618,6 +3670,205 @@ export function validateEntity(collection, obj, db = null, options = {}) {
           );
         }
       }
+    }
+
+    /* ---------------------------------------------------
+       PHASE 6 — STEP 6
+       STUDENT MODEL VARIABLES (SMVs)
+       Optional at every status (see the `smVariables` field comment
+       above) -- these checks validate the SHAPE of entries that ARE
+       present, they never require the array to be non-empty. This runs
+       unconditionally (not gated by `strict`) because, unlike wizard
+       step completeness, a malformed SMV that IS authored is wrong at
+       every status, not just at confirm time.
+    --------------------------------------------------- */
+
+    if (obj.psychologicalPerspective !== undefined && obj.psychologicalPerspective !== null) {
+      if (!PSYCHOLOGICAL_PERSPECTIVE_VALUES.includes(obj.psychologicalPerspective)) {
+        errors.push(
+          `Invalid psychologicalPerspective '${obj.psychologicalPerspective}'. Must be one of: ${PSYCHOLOGICAL_PERSPECTIVE_VALUES.join(", ")}.`
+        );
+      }
+    }
+
+    if (Array.isArray(obj.smVariables)) {
+      const seenIds = new Set();
+
+      obj.smVariables.forEach((smv, i) => {
+        const tag = `smVariables[${i}]${smv?.id ? ` (${smv.id})` : ""}`;
+
+        if (!smv || typeof smv !== "object") {
+          errors.push(`${tag} must be an object.`);
+          return;
+        }
+
+        if (!smv.id || !smv.label || !smv.type) {
+          errors.push(`${tag} is missing a required field: id, label and type are all required.`);
+        }
+
+        if (smv.id) {
+          if (seenIds.has(smv.id)) {
+            errors.push(`Duplicate smVariables id '${smv.id}'.`);
+          }
+          seenIds.add(smv.id);
+        }
+
+        if (smv.type && !SM_VARIABLE_TYPE_VALUES.includes(smv.type)) {
+          errors.push(
+            `${tag} has invalid type '${smv.type}'. Must be one of: ${SM_VARIABLE_TYPE_VALUES.join(", ")}.`
+          );
+          // Type-dependent checks below all assume a known type.
+          return;
+        }
+
+        const scale = smv.scale || {};
+
+        if (smv.type === "continuous") {
+          const { min, max } = scale;
+          if (typeof min !== "number" || typeof max !== "number" || min >= max) {
+            errors.push(`${tag} (continuous) requires scale.min < scale.max.`);
+          }
+        } else if (smv.type === "binary" || smv.type === "ordinal" || smv.type === "categorical") {
+          const states = scale.states;
+          if (!Array.isArray(states) || new Set(states).size !== states.length) {
+            errors.push(`${tag} (${smv.type}) requires scale.states as an array of unique values.`);
+          } else if (smv.type === "binary" && states.length !== 2) {
+            errors.push(`${tag} (binary) requires exactly 2 scale.states.`);
+          } else if (smv.type !== "binary" && states.length < 2) {
+            errors.push(`${tag} (${smv.type}) requires at least 2 scale.states.`);
+          }
+        }
+
+        const prior = smv.priorDistribution;
+        if (!prior || typeof prior !== "object" || !prior.family) {
+          errors.push(`${tag} requires a priorDistribution with a family.`);
+        } else if (smv.type && !isPriorFamilyCompatible(smv.type, prior.family)) {
+          errors.push(
+            `${tag} (${smv.type}) has incompatible priorDistribution.family '${prior.family}'. Allowed: ${priorFamiliesForSmVariableType(smv.type).join(", ")}.`
+          );
+        } else if (!priorDistributionParamsAreValid(prior.family, prior.params)) {
+          errors.push(`${tag} has invalid priorDistribution.params for family '${prior.family}'.`);
+        }
+      });
+    }
+  }
+
+  /* =====================================================
+     ASSEMBLY MODELS — Day 17, Week 4 core schema
+     -----------------------------------------------------
+     Structural + referential-integrity validation only. No lifecycle
+     governance (confirmed/locked/versioning chains) yet -- that is
+     Day 21's "matrix entries + validateXLifecycle() for each new core
+     collection", applied uniformly across every collection declared
+     this week, not reinvented per-collection early.
+  ===================================================== */
+
+  if (collection === "assemblyModels") {
+
+    if (!obj.name) errors.push("Assembly model name is required.");
+    if (!obj.competencyModelId) errors.push("competencyModelId is required.");
+    if (!obj.status) {
+      errors.push("status is required.");
+    } else if (!STATUS.includes(obj.status)) {
+      errors.push(`Invalid assembly model status '${obj.status}'.`);
+    }
+
+    const competencyModel = db && obj.competencyModelId
+      ? db.competencyModels?.find(m => m.id === obj.competencyModelId)
+      : undefined;
+
+    if (db && obj.competencyModelId && !competencyModel) {
+      errors.push(`Invalid competencyModelId: ${obj.competencyModelId}`);
+    }
+
+    const knownSmVariables = new Map(
+      (competencyModel?.smVariables || []).map(smv => [smv.id, smv])
+    );
+
+    if (obj.targetsBySMV !== undefined && !Array.isArray(obj.targetsBySMV)) {
+      errors.push("targetsBySMV should be array");
+    } else if (Array.isArray(obj.targetsBySMV)) {
+      const seenSmvIds = new Set();
+
+      obj.targetsBySMV.forEach((target, i) => {
+        const tag = `targetsBySMV[${i}]`;
+
+        if (!target || typeof target !== "object" || !target.smvId) {
+          errors.push(`${tag} requires an smvId.`);
+          return;
+        }
+
+        if (seenSmvIds.has(target.smvId)) {
+          errors.push(`${tag} duplicates target smvId '${target.smvId}'.`);
+        }
+        seenSmvIds.add(target.smvId);
+
+        // Only checkable once the competency model is resolvable; a
+        // dangling competencyModelId is already reported above and
+        // would make every target look "unknown" for the wrong reason.
+        if (competencyModel) {
+          const smv = knownSmVariables.get(target.smvId);
+          if (!smv) {
+            errors.push(`${tag} names smvId '${target.smvId}', which does not exist on competency model '${obj.competencyModelId}'.`);
+            return;
+          }
+
+          const hasSEM = typeof target.requiredSEM === "number";
+          const hasAccuracy = typeof target.requiredClassificationAccuracy === "number";
+
+          if (hasSEM === hasAccuracy) {
+            errors.push(`${tag} must specify exactly one of requiredSEM or requiredClassificationAccuracy.`);
+          } else if (smv.type === "continuous") {
+            if (!hasSEM) {
+              errors.push(`${tag} targets a continuous SMV ('${target.smvId}') and must specify requiredSEM, not requiredClassificationAccuracy.`);
+            } else if (target.requiredSEM <= 0) {
+              errors.push(`${tag} requiredSEM must be greater than 0.`);
+            }
+          } else {
+            if (!hasAccuracy) {
+              errors.push(`${tag} targets a ${smv.type} SMV ('${target.smvId}') and must specify requiredClassificationAccuracy, not requiredSEM.`);
+            } else if (target.requiredClassificationAccuracy <= 0 || target.requiredClassificationAccuracy > 1) {
+              errors.push(`${tag} requiredClassificationAccuracy must be in (0, 1].`);
+            }
+          }
+        }
+      });
+    }
+
+    if (obj.stoppingRules !== undefined && obj.stoppingRules !== null) {
+      const sr = obj.stoppingRules;
+      if (typeof sr !== "object" || Array.isArray(sr)) {
+        errors.push("stoppingRules should be object");
+      } else {
+        const { maxItems, minItems, targetsMet } = sr;
+        if (maxItems === undefined && minItems === undefined && targetsMet === undefined) {
+          errors.push("stoppingRules must declare at least one of maxItems, minItems or targetsMet.");
+        }
+        if (maxItems !== undefined && (typeof maxItems !== "number" || maxItems <= 0)) {
+          errors.push("stoppingRules.maxItems must be a positive number.");
+        }
+        if (minItems !== undefined && (typeof minItems !== "number" || minItems <= 0)) {
+          errors.push("stoppingRules.minItems must be a positive number.");
+        }
+        if (
+          typeof maxItems === "number" &&
+          typeof minItems === "number" &&
+          minItems > maxItems
+        ) {
+          errors.push("stoppingRules.minItems cannot exceed stoppingRules.maxItems.");
+        }
+        if (targetsMet !== undefined && typeof targetsMet !== "boolean") {
+          errors.push("stoppingRules.targetsMet should be boolean");
+        }
+      }
+    }
+
+    if (!obj.selectionAlgorithm || typeof obj.selectionAlgorithm !== "object") {
+      errors.push("selectionAlgorithm is required and must reference a policyId.");
+    } else if (!obj.selectionAlgorithm.policyId) {
+      errors.push("selectionAlgorithm.policyId is required.");
+    } else if (db && !db.policies?.find(p => p.id === obj.selectionAlgorithm.policyId)) {
+      errors.push(`Invalid selectionAlgorithm.policyId: ${obj.selectionAlgorithm.policyId}`);
     }
   }
 
