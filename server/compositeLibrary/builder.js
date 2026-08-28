@@ -146,3 +146,58 @@ export function buildCompositeLibrary(taskModel, db) {
 
   return { record, warnings };
 }
+
+/**
+ * Day 25: is a compiled compositeLibrary record stale, per ADR 0003's
+ * invalidation rule? A revision to the Task Model itself, or to any
+ * Evidence Model an item in this package was compiled against, invalidates
+ * the package -- structural facts baked in at compile time (§ ADR 0003)
+ * may no longer be current. Recalibration is deliberately NOT a staleness
+ * signal: calibrated parameters are resolved live by pointer (never baked
+ * in), so a new parameter set or a flipped `activeParameterSetId` on an
+ * unrelated `versionNumber` never makes a compiled package stale -- that
+ * is the entire point of the boundary the ADR draws.
+ *
+ * @param {object} libraryRecord - a compiled compositeLibrary record (the
+ *   output of buildCompositeLibrary, plus whatever `id` the caller assigned)
+ * @param {{ taskModel: object, evidenceModels?: object[] }} current - the
+ *   CURRENT state of the Task Model and any Evidence Models to check
+ *   against (only the ones referenced by libraryRecord.items are consulted)
+ * @returns {{ stale: boolean, reasons: string[] }}
+ */
+export function isCompositeLibraryStale(libraryRecord, { taskModel, evidenceModels = [] } = {}) {
+  if (!libraryRecord || !taskModel) {
+    throw new Error("isCompositeLibraryStale requires both a libraryRecord and the current taskModel.");
+  }
+
+  const reasons = [];
+
+  if (libraryRecord.taskModelVersion !== taskModel.versionNumber) {
+    reasons.push(
+      `Task model '${taskModel.id}' is now at version ${taskModel.versionNumber}; this package was compiled against version ${libraryRecord.taskModelVersion}.`
+    );
+  }
+
+  const evidenceModelsById = new Map(evidenceModels.map((em) => [em.id, em]));
+  const checkedEvidenceModelIds = new Set();
+
+  for (const entry of libraryRecord.items || []) {
+    if (checkedEvidenceModelIds.has(entry.evidenceModelId)) continue;
+    checkedEvidenceModelIds.add(entry.evidenceModelId);
+
+    const currentEm = evidenceModelsById.get(entry.evidenceModelId);
+
+    if (
+      currentEm &&
+      typeof currentEm.versionNumber === "number" &&
+      typeof entry.evidenceModelVersion === "number" &&
+      currentEm.versionNumber !== entry.evidenceModelVersion
+    ) {
+      reasons.push(
+        `Evidence model '${entry.evidenceModelId}' is now at version ${currentEm.versionNumber}; this package's items were compiled against version ${entry.evidenceModelVersion}.`
+      );
+    }
+  }
+
+  return { stale: reasons.length > 0, reasons };
+}
