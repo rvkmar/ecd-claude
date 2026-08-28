@@ -4,6 +4,7 @@ import { loadDB, saveDB, finishSession } from "../../src/utils/db-server.js";
 import { validateEntity } from "../../src/utils/schema.js";
 import { SESSION_STATUS } from "../../src/utils/sessionStatus.js";
 import { identifyEvidence } from "../delivery/evidenceIdentification.js";
+import { recordItemUsage } from "../utils/itemExposure.js";
 import { log2 } from "mathjs"; // if not available, define inline
 
 // Day 28 (Week 6): a session scores through an authored Evidence Model,
@@ -247,6 +248,18 @@ router.post("/:id/submit", async (req, res) => {
       task.generatedObservationIds.push(evidence.observationId);
     }
     task.updatedAt = new Date().toISOString();
+
+    // Day 29: this is the seam server/utils/itemExposure.js's own header
+    // comment names -- the moment an item is actually delivered to a
+    // student, not the record-usage HTTP route (author-gated, and until
+    // today had no caller at all). A no-op for a non-operational item
+    // (e.g. delivered in a preview/test context) is not an error here;
+    // only a truly operational item accrues real exposure.
+    const itemIndex = db.items.findIndex(it => it.id === itemId);
+    const usageResult = recordItemUsage(item, db, {});
+    if (usageResult.ok) {
+      db.items[itemIndex] = usageResult.item;
+    }
 
     const { valid, errors } = validateEntity("sessions", session, db);
     if (!valid) {

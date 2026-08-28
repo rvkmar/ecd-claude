@@ -78,17 +78,47 @@ const evidenceModel = {
 
 const item = {
   id: "item1",
+  taskModelId: "tm1",
   versionNumber: 1,
   taskModelVersion: 1,
   observationId: "o1",
   evidenceModelId: "em1",
+  evidenceModelVersion: 1,
+  locked: true,
+  equivalenceGroupId: "grp1",
+  stimulus: { layout: "single", blocks: [{ type: "text", content: "2/4 = ?" }] },
+  interaction: { type: "mcq", responseComponents: [{ id: "opt_a" }, { id: "opt_b" }, { id: "opt_c" }] },
   scoring: {
     method: "dichotomous",
+    maxScore: 1,
     evidenceActivationMap: [
       { responsePattern: { selected: "opt_a" }, activatesObservable: true, strengthOverride: 4, rationale: "Correct." },
       { responsePattern: { selected: ["opt_b", "opt_c"] }, activatesObservable: false, rationale: "Distractor." },
     ],
   },
+};
+
+// A fully "operational"-ready set (Day 29 exposure tests only): strict
+// item validation at `operational` needs more than the base fixtures above
+// declare (an operational Evidence Model, a statisticalModelType + pilot
+// irtParams on the item, and a single-direction evidenceActivationMap --
+// mixing an activatesObservable:false entry into a purely "supports"
+// observable trips a pre-existing coherence check unrelated to exposure).
+const operationalEvidenceModel = { ...evidenceModel, status: "operational", locked: true };
+const operationalTaskModel = {
+  id: "tm1",
+  versionNumber: 1,
+  status: "operational",
+  locked: true,
+  evidenceModelIds: ["em1"],
+  expectedObservations: [{ observationId: "o1", evidenceModelId: "em1", required: true, weight: 1 }],
+};
+const operationalItem = {
+  ...item,
+  status: "operational",
+  psychometrics: { statisticalModelType: "irt", irtParams: { a: 1, b: 0 } },
+  scoring: { ...item.scoring, evidenceActivationMap: [item.scoring.evidenceActivationMap[0]] },
+  exposureControl: { usageCount: 0, maxUsageBeforeRetire: 5, reactivationCount: 0, maxReactivations: 0 },
 };
 
 function makeSession(overrides = {}) {
@@ -120,7 +150,14 @@ function makeDb(overrides = {}) {
   return {
     sessions: [makeSession()],
     tasks: [makeTask()],
-    taskModels: [{ id: "tm1", evidenceModelIds: ["em1"] }],
+    taskModels: [{
+      id: "tm1",
+      versionNumber: 1,
+      status: "operational",
+      locked: true,
+      evidenceModelIds: ["em1"],
+      expectedObservations: [{ observationId: "o1", evidenceModelId: "em1", required: true, weight: 1 }],
+    }],
     evidenceModels: [evidenceModel],
     items: [item],
     ...overrides,
@@ -189,6 +226,47 @@ describe("POST /:id/submit — item-based delivery (Day 28)", () => {
     expect(db.sessions[0].currentTaskIndex).toBe(1);
     expect(db.tasks[0].generatedObservationIds).toContain("o1");
     expect(saveDB).toHaveBeenCalled();
+  });
+
+  it("increments usageCount on an operational item, for the first time in the app's history", async () => {
+    const db = makeDb({
+      items: [operationalItem],
+      evidenceModels: [operationalEvidenceModel],
+      taskModels: [operationalTaskModel],
+    });
+    const app = buildApp(db);
+
+    await request(app).post("/api/sessions/s1/submit").send({ taskId: "t1", itemId: "item1", rawAnswer: "opt_a" });
+
+    expect(db.items[0].exposureControl.usageCount).toBe(1);
+    expect(db.items[0].status).toBe("operational");
+  });
+
+  it("auto-suspends an item once usageCount reaches maxUsageBeforeRetire", async () => {
+    const almostRetired = { ...operationalItem, exposureControl: { ...operationalItem.exposureControl, usageCount: 4 } };
+    const db = makeDb({
+      items: [almostRetired],
+      evidenceModels: [operationalEvidenceModel],
+      taskModels: [operationalTaskModel],
+    });
+    const app = buildApp(db);
+
+    await request(app).post("/api/sessions/s1/submit").send({ taskId: "t1", itemId: "item1", rawAnswer: "opt_a" });
+
+    expect(db.items[0].exposureControl.usageCount).toBe(5);
+    expect(db.items[0].status).toBe("suspended");
+  });
+
+  it("does not accrue exposure for a non-operational item (draft/preview delivery), but still scores it", async () => {
+    const draftItem = { ...item, status: "draft" };
+    const db = makeDb({ items: [draftItem] });
+    const app = buildApp(db);
+
+    const res = await request(app).post("/api/sessions/s1/submit").send({ taskId: "t1", itemId: "item1", rawAnswer: "opt_a" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.responses[0].activated).toBe(true);
+    expect(db.items[0].status).toBe("draft");
   });
 
   it("rejects an unknown itemId with 400, without touching the legacy path", async () => {
