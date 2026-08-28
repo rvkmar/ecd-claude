@@ -444,6 +444,54 @@ export function psychologicalPerspectiveLabel(value) {
 }
 
 /* =====================================================
+   9. Cognitive-demand vocabulary: Bloom levels and reasoning types
+   -----------------------------------------------------
+   Day 22 (Week 5, vocabulary consolidation). Previously canonically
+   defined in src/components/taskModels/taskModelConstants.js and
+   re-exported from src/components/itemBank/itemConstants.js -- the same
+   "one definition, re-exported for existing call sites" arrangement this
+   file's header already documents for INTERACTION_TYPES/SCORING_METHODS,
+   and for the same reason: an item used to carry its own 4-value
+   REASONING_TYPES while the Task Model blueprint declared 7, three of
+   which no item could ever record -- a permanent false positive in
+   blueprint-coverage reporting. Moved here so schema.js (loaded directly
+   by node, not just bundled by vite) can validate against the same
+   values a `<select>` renders, instead of only checking `typeof ===
+   'string'` as it did before Day 22.
+===================================================== */
+
+export const BLOOM_LEVELS = [
+  { value: "remember", label: "Remember" },
+  { value: "understand", label: "Understand" },
+  { value: "apply", label: "Apply" },
+  { value: "analyze", label: "Analyze" },
+  { value: "evaluate", label: "Evaluate" },
+  { value: "create", label: "Create" },
+];
+
+export const BLOOM_LEVEL_VALUES = BLOOM_LEVELS.map((b) => b.value);
+
+export function bloomLevelLabel(value) {
+  return BLOOM_LEVELS.find((b) => b.value === value)?.label || value || "—";
+}
+
+export const REASONING_TYPES = [
+  { value: "recall", label: "Recall" },
+  { value: "procedural", label: "Procedural" },
+  { value: "algorithmic", label: "Algorithm Execution" },
+  { value: "deductive", label: "Deductive Inference" },
+  { value: "inductive", label: "Inductive Inference" },
+  { value: "quantitative", label: "Quantitative Reasoning" },
+  { value: "evaluative", label: "Evaluative Judgement" },
+];
+
+export const REASONING_TYPE_VALUES = REASONING_TYPES.map((r) => r.value);
+
+export function reasoningTypeLabel(value) {
+  return REASONING_TYPES.find((r) => r.value === value)?.label || value || "—";
+}
+
+/* =====================================================
    8. Calibration file kinds (Day 19, Week 4 core schema)
    -----------------------------------------------------
    NOT YET unified with the pre-existing, purely client-side

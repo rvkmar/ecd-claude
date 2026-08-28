@@ -30,6 +30,8 @@ import {
   PSYCHOLOGICAL_PERSPECTIVE_VALUES,
   CALIBRATION_FILE_KIND_VALUES,
   statisticalModelTypesForCalibrationKind,
+  BLOOM_LEVEL_VALUES,
+  REASONING_TYPE_VALUES,
 } from "./ecdVocabulary.js";
 
 // Canonical session status spellings -- see src/utils/sessionStatus.js for
@@ -2647,6 +2649,25 @@ export function validateEntity(collection, obj, db = null, options = {}) {
       errors.push("scoring.maxScore must be a positive number.");
     }
 
+    // Day 22 (vocabulary consolidation): cognitiveDemand.bloomLevel/
+    // reasoningType were declared as bare 'string' with no enum check at
+    // all before this -- any string passed. BLOOM_LEVELS/REASONING_TYPES
+    // moved to ecdVocabulary.js specifically so this validator and the
+    // wizard <select> it constrains read the same values.
+    if (obj.cognitiveDemand?.bloomLevel &&
+        !BLOOM_LEVEL_VALUES.includes(obj.cognitiveDemand.bloomLevel)) {
+      errors.push(
+        `Unknown cognitiveDemand.bloomLevel '${obj.cognitiveDemand.bloomLevel}'. Known levels: ${BLOOM_LEVEL_VALUES.join(", ")}.`
+      );
+    }
+
+    if (obj.cognitiveDemand?.reasoningType &&
+        !REASONING_TYPE_VALUES.includes(obj.cognitiveDemand.reasoningType)) {
+      errors.push(
+        `Unknown cognitiveDemand.reasoningType '${obj.cognitiveDemand.reasoningType}'. Known types: ${REASONING_TYPE_VALUES.join(", ")}.`
+      );
+    }
+
     for (const map of obj.scoring?.evidenceActivationMap || []) {
 
       if (map.activatesObservable !== undefined &&
@@ -3294,6 +3315,23 @@ export function validateEntity(collection, obj, db = null, options = {}) {
         !Array.isArray(bc.allowedScoringMethods)
       ) {
         errors.push("blueprintConstraints.allowedScoringMethods must be an array.");
+      }
+
+      // Day 22 (vocabulary consolidation): same enum-validity gap as the
+      // item-level cognitiveDemand check below -- bloomLevel/reasoningType
+      // were bare 'string' with no allow-list check until now.
+      if (bc.cognitiveDemand?.bloomLevel &&
+          !BLOOM_LEVEL_VALUES.includes(bc.cognitiveDemand.bloomLevel)) {
+        errors.push(
+          `Unknown blueprintConstraints.cognitiveDemand.bloomLevel '${bc.cognitiveDemand.bloomLevel}'. Known levels: ${BLOOM_LEVEL_VALUES.join(", ")}.`
+        );
+      }
+
+      if (bc.cognitiveDemand?.reasoningType &&
+          !REASONING_TYPE_VALUES.includes(bc.cognitiveDemand.reasoningType)) {
+        errors.push(
+          `Unknown blueprintConstraints.cognitiveDemand.reasoningType '${bc.cognitiveDemand.reasoningType}'. Known types: ${REASONING_TYPE_VALUES.join(", ")}.`
+        );
       }
     }
 

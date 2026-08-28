@@ -25,6 +25,10 @@ import { interactionTypesForObservable, deriveAllowedScoringMethods } from "../u
 import { validateItemLifecycle } from "../../server/utils/lifecycleValidation.js";
 import { calibrationGate } from "../../server/routes/evidenceModels.js";
 
+import { BLOOM_LEVELS as CANONICAL_BLOOM_LEVELS, REASONING_TYPES as CANONICAL_REASONING_TYPES } from "../utils/ecdVocabulary.js";
+import { BLOOM_LEVELS as TASK_MODEL_BLOOM_LEVELS, REASONING_TYPES as TASK_MODEL_REASONING_TYPES } from "../components/taskModels/taskModelConstants.js";
+import { BLOOM_LEVELS as ITEM_BLOOM_LEVELS, REASONING_TYPES as ITEM_REASONING_TYPES } from "../components/itemBank/itemConstants.js";
+
 /* =====================================================
    Shared fixtures -- one valid baseline per entity, mutated per test.
 ===================================================== */
@@ -353,5 +357,32 @@ describe("mirror: resolveCalibrationWindow() <-> calibrationGate()", () => {
     const serverOpen = calibrationGate(model, "Recalibration") === null;
 
     expect(clientOpen).toBe(serverOpen);
+  });
+});
+
+/* =====================================================
+   5. BLOOM_LEVELS / REASONING_TYPES -- one canonical source, two
+      re-export hops
+   -----------------------------------------------------
+   Day 22 (vocabulary consolidation). Unlike the four pairs above, there is
+   no authoritative-server-function-vs-advisory-client-mirror here to test
+   for AGREEMENT -- schema.js just imports the same arrays taskModelConstants.js
+   and itemConstants.js re-export, so the drift risk is simpler: "one list,
+   reached two different ways, must actually BE the same list." This is
+   exactly the failure mode that motivated the move -- an item used to carry
+   its own 4-value REASONING_TYPES while the Task Model blueprint declared 7,
+   three of which no item could ever record. Asserting reference equality
+   (not just deep equality) proves the re-export chain hasn't quietly forked
+   back into two copies.
+===================================================== */
+describe("mirror: BLOOM_LEVELS / REASONING_TYPES canonical source", () => {
+  it("taskModelConstants.js re-exports the exact ecdVocabulary.js array", () => {
+    expect(TASK_MODEL_BLOOM_LEVELS).toBe(CANONICAL_BLOOM_LEVELS);
+    expect(TASK_MODEL_REASONING_TYPES).toBe(CANONICAL_REASONING_TYPES);
+  });
+
+  it("itemConstants.js re-exports the exact ecdVocabulary.js array", () => {
+    expect(ITEM_BLOOM_LEVELS).toBe(CANONICAL_BLOOM_LEVELS);
+    expect(ITEM_REASONING_TYPES).toBe(CANONICAL_REASONING_TYPES);
   });
 });

@@ -91,41 +91,20 @@ export const LOAD_LEVELS = [
 
 /* ---------------- Blueprint vocabulary ---------------- */
 
-export const BLOOM_LEVELS = [
-    { value: "remember", label: "Remember" },
-    { value: "understand", label: "Understand" },
-    { value: "apply", label: "Apply" },
-    { value: "analyze", label: "Analyze" },
-    { value: "evaluate", label: "Evaluate" },
-    { value: "create", label: "Create" },
-];
-
-export const REASONING_TYPES = [
-    { value: "recall", label: "Recall" },
-    { value: "procedural", label: "Procedural" },
-    { value: "algorithmic", label: "Algorithm Execution" },
-    { value: "deductive", label: "Deductive Inference" },
-    { value: "inductive", label: "Inductive Inference" },
-    { value: "quantitative", label: "Quantitative Reasoning" },
-    { value: "evaluative", label: "Evaluative Judgement" },
-];
-
-/* Interaction types and scoring methods are NOT defined here.
+/* BLOOM_LEVELS and REASONING_TYPES are NOT defined here as of Day 22.
  *
- * They are the item-delivery vocabulary, shared by the Item Wizard, this
- * blueprint step and src/utils/schema.js, and they now have exactly one
- * definition in src/utils/ecdVocabulary.js. This file used to carry its
- * own copy with a comment telling the reader to keep it in step by hand
- * -- which is the arrangement that let the vocabularies drift in the
- * first place.
- *
- * Re-exported rather than just imported so existing call sites
- * (Step5Blueprint, the tests) keep working unchanged, and so there is
- * still one obvious import for anything task-model-shaped. */
+ * Same story as INTERACTION_TYPES/SCORING_METHODS below: this file used to
+ * carry its own copy, itemConstants.js re-exported it, and the two drifted
+ * -- an item used to carry its own 4-value REASONING_TYPES while this
+ * blueprint declared 7, three of which no item could ever record. Moved to
+ * src/utils/ecdVocabulary.js so schema.js can validate against the same
+ * values a `<select>` renders, instead of only checking `typeof ===
+ * 'string'`. Re-exported rather than just imported so existing call sites
+ * (Step5Blueprint, the tests) keep working unchanged. */
 // Relative, not the "@/" alias: only vite resolves that, and this module
 // is also loaded directly by node in verification scripts. Same reason
 // src/utils/schema.js imports lifecycleMatrix.js by relative path.
-export { INTERACTION_TYPES, SCORING_METHODS } from "../../utils/ecdVocabulary.js";
+export { INTERACTION_TYPES, SCORING_METHODS, BLOOM_LEVELS, REASONING_TYPES } from "../../utils/ecdVocabulary.js";
 
 // Blueprint whitelists (`allowedInteractionTypes`, `allowedScoringMethods`)
 // are validated against those same values in src/utils/schema.js, so the

@@ -269,32 +269,43 @@ describe("review stage", () => {
     expect(res.status).toBe(400);
   });
 
-  it("never reports a move it did not make", async () => {
-    // The regression guard for the silent no-op. Every status the matrix
-    // permits must either change `status` or return a non-200.
-    const STATUSES = ["draft", "reviewed", "confirmed", "operational", "suspended", "archived"];
+  it(
+    "never reports a move it did not make",
+    async () => {
+      // The regression guard for the silent no-op. Every status the matrix
+      // permits must either change `status` or return a non-200.
+      const STATUSES = ["draft", "reviewed", "confirmed", "operational", "suspended", "archived"];
 
-    for (const from of STATUSES) {
-      for (const to of STATUSES) {
-        if (from === to) continue;
+      for (const from of STATUSES) {
+        for (const to of STATUSES) {
+          if (from === to) continue;
 
-        const { app, db } = await buildApp(
-          makeModel({ status: from, locked: !["draft", "reviewed"].includes(from) })
-        );  // default fixture carries a confirmed task model
+          const { app, db } = await buildApp(
+            makeModel({ status: from, locked: !["draft", "reviewed"].includes(from) })
+          );  // default fixture carries a confirmed task model
 
-        const res = await request(app)
-          .patch("/api/evidenceModels/em1/lifecycle")
-          .send({ nextStatus: to });
+          const res = await request(app)
+            .patch("/api/evidenceModels/em1/lifecycle")
+            .send({ nextStatus: to });
 
-        if (res.status === 200) {
-          expect(
-            db.evidenceModels[0].status,
-            `${from} -> ${to} returned 200 but stored status is "${db.evidenceModels[0].status}"`
-          ).toBe(to);
+          if (res.status === 200) {
+            expect(
+              db.evidenceModels[0].status,
+              `${from} -> ${to} returned 200 but stored status is "${db.evidenceModels[0].status}"`
+            ).toBe(to);
+          }
         }
       }
-    }
-  });
+    },
+    // 30 (from, to) pairs, each via buildApp()'s vi.resetModules() + a cold
+    // dynamic re-import of evidenceModels.js (which transitively pulls in
+    // schema.js -- now ~4300 lines after seven days of this week's schema
+    // additions). Same root cause and same fix as routeAuth.test.js's
+    // sessionRoutes timeout: a slow-import timing issue on this memory-
+    // constrained sandbox, not a behavioral flake, so a longer budget is
+    // correct rather than a retry.
+    30000
+  );
 
   it("refuses a status that is not in the lifecycle at all", async () => {
     const { app, db } = await buildApp(makeModel());
