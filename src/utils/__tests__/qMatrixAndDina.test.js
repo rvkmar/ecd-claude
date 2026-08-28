@@ -136,6 +136,14 @@ describe("qMatrixModels — deliberate mutations", () => {
     const errors = qMatrixErrors(mutated);
     expect(errors.join(" ")).toMatch(/Q-matrix name is required/);
   });
+
+  // Day 21: lifecycle wiring added `locked`, mirroring competencyModels/
+  // assemblyModels' own "confirmed must be locked" rule.
+  it("requires a confirmed Q-matrix to be locked", () => {
+    const mutated = makeQMatrix({ status: "confirmed", locked: false });
+    const errors = qMatrixErrors(mutated);
+    expect(errors.join(" ")).toMatch(/Confirmed Q-matrix models must be locked/);
+  });
 });
 
 describe("evidenceModels.statisticalModels — dina/gdina structural checks", () => {

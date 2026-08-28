@@ -178,4 +178,12 @@ describe("assemblyModels — deliberate mutations", () => {
     const errors = assemblyErrors(mutated);
     expect(errors.join(" ")).toMatch(/competencyModelId is required/);
   });
+
+  // Day 21: lifecycle wiring added `locked`, mirroring competencyModels/
+  // taskModels' own "confirmed must be locked" rule.
+  it("requires a confirmed assembly model to be locked", () => {
+    const mutated = makeAssemblyModel({ status: "confirmed", locked: false });
+    const errors = assemblyErrors(mutated);
+    expect(errors.join(" ")).toMatch(/Confirmed assembly models must be locked/);
+  });
 });

@@ -531,6 +531,17 @@ export const schema = {
     stoppingRules: 'object',
     selectionAlgorithm: 'object',
     status: 'string',
+    // Day 21 (Week 5): lifecycle wiring. `locked`/`versionNumber`/
+    // `parentModelId` bring this entity's shape in line with every other
+    // lifecycle-governed collection (competencyModels, taskModels, items),
+    // since validateAssemblyModelLifecycle (server/utils/lifecycleValidation.js)
+    // and the confirmed-requires-locked check below both need them. Full
+    // version-migration governance (the multi-step chain competencyModels
+    // has) is NOT built here -- out of scope for "legal transitions + a
+    // promotion validator."
+    locked: 'boolean',
+    versionNumber: 'number',
+    parentModelId: 'string',
     createdAt: 'date',
     updatedAt: 'date',
   },
@@ -569,6 +580,11 @@ export const schema = {
     attributeIds: 'array',
     entries: 'array',
     status: 'string',
+    // Day 21 (Week 5): lifecycle wiring -- see the identical comment on
+    // assemblyModels above.
+    locked: 'boolean',
+    versionNumber: 'number',
+    parentModelId: 'string',
     createdAt: 'date',
     updatedAt: 'date',
   },
@@ -3943,13 +3959,16 @@ export function validateEntity(collection, obj, db = null, options = {}) {
   }
 
   /* =====================================================
-     ASSEMBLY MODELS — Day 17, Week 4 core schema
+     ASSEMBLY MODELS — Day 17 (structural), Day 21 (lifecycle)
      -----------------------------------------------------
-     Structural + referential-integrity validation only. No lifecycle
-     governance (confirmed/locked/versioning chains) yet -- that is
-     Day 21's "matrix entries + validateXLifecycle() for each new core
-     collection", applied uniformly across every collection declared
-     this week, not reinvented per-collection early.
+     Structural + referential-integrity validation here. Promotion-
+     readiness completeness (what must be true for THIS status change to
+     be allowed, not just internally well-formed) lives in
+     validateAssemblyModelLifecycle (server/utils/lifecycleValidation.js),
+     the same separation of concerns taskModels/items already use. Full
+     version-migration governance (the multi-step chain competencyModels
+     has) is deliberately not built here -- out of scope for "legal
+     transitions + a promotion validator."
   ===================================================== */
 
   if (collection === "assemblyModels") {
@@ -3960,6 +3979,9 @@ export function validateEntity(collection, obj, db = null, options = {}) {
       errors.push("status is required.");
     } else if (!STATUS.includes(obj.status)) {
       errors.push(`Invalid assembly model status '${obj.status}'.`);
+    }
+    if (obj.status === "confirmed" && !obj.locked) {
+      errors.push("Confirmed assembly models must be locked.");
     }
 
     const competencyModel = db && obj.competencyModelId
@@ -4079,6 +4101,9 @@ export function validateEntity(collection, obj, db = null, options = {}) {
       errors.push("status is required.");
     } else if (!STATUS.includes(obj.status)) {
       errors.push(`Invalid Q-matrix status '${obj.status}'.`);
+    }
+    if (obj.status === "confirmed" && !obj.locked) {
+      errors.push("Confirmed Q-matrix models must be locked.");
     }
 
     const competencyModel = db && obj.competencyModelId

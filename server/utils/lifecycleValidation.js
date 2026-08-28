@@ -426,3 +426,127 @@ export function validateItemLifecycle(item, db = null, options = {}) {
 
   return errors;
 }
+
+// -------------------------------------
+// ASSEMBLY MODEL lifecycle validation — Day 21, Week 5
+// -------------------------------------
+// Unlike taskModels/items, this collection has no dedicated route yet
+// (assemblyModels is still "declared and validated, not mounted, no UI" --
+// see src/utils/schema.js). With no route layer to compute prevStatus vs
+// nextStatus and gate on canTransition() itself, this function does that
+// self-lookup directly (the same `db.<collection>?.find(m => m.id === obj.id)`
+// idiom schema.js's own immutability checks already use), so the promotion
+// validator is a complete, callable artifact on its own -- not half of one
+// waiting on a route that doesn't exist yet.
+export function validateAssemblyModelLifecycle(assemblyModel, db = null, options = {}) {
+  const errors = [];
+  const status = assemblyModel.status || "draft";
+
+  if (db && assemblyModel.id) {
+    const existing = db.assemblyModels?.find((m) => m.id === assemblyModel.id);
+    if (existing && existing.status !== status && !canTransition(existing.status, status)) {
+      errors.push(`Illegal assembly model status transition: '${existing.status}' -> '${status}'.`);
+    }
+  }
+
+  /* REVIEWED — the parts of the shape a reviewer needs to see filled in. */
+  if (["reviewed", "confirmed", "operational", "suspended"].includes(status)) {
+    if (!assemblyModel.name) {
+      errors.push("Assembly model must have a name before review.");
+    }
+    if (!assemblyModel.competencyModelId) {
+      errors.push("Assembly model must reference a competencyModelId before review.");
+    }
+    if (!Array.isArray(assemblyModel.targetsBySMV) || assemblyModel.targetsBySMV.length === 0) {
+      errors.push("Assembly model must declare at least one SMV accuracy target before review.");
+    }
+    if (!assemblyModel.selectionAlgorithm?.policyId) {
+      errors.push("Assembly model must bind a selectionAlgorithm.policyId before review.");
+    }
+  }
+
+  /* CONFIRMED — stopping rules are what make this usable by a session. */
+  if (["confirmed", "operational", "suspended"].includes(status)) {
+    if (!assemblyModel.stoppingRules) {
+      errors.push("Assembly model must declare stoppingRules before confirmation.");
+    }
+  }
+
+  /* ACTIVATION — the competency model it targets must itself be live, and
+     at the exact version this assembly model was authored against. Mirrors
+     validateTaskModelLifecycle's "bound Evidence Models must be
+     operational" gate. */
+  if (status === "operational" && db) {
+    const cm = db.competencyModels?.find((m) => m.id === assemblyModel.competencyModelId);
+
+    if (!cm) {
+      errors.push(`Assembly model cannot be activated: competency model '${assemblyModel.competencyModelId}' not found.`);
+    } else {
+      if (cm.status !== "operational") {
+        errors.push(`Assembly model cannot be activated: bound competency model must be operational first (found '${cm.status}').`);
+      }
+      if (assemblyModel.competencyModelVersion !== cm.versionNumber) {
+        errors.push(`Assembly model cannot be activated: competencyModelVersion (${assemblyModel.competencyModelVersion}) does not match the competency model's current version (${cm.versionNumber}).`);
+      }
+    }
+  }
+
+  return errors;
+}
+
+// -------------------------------------
+// Q-MATRIX MODEL lifecycle validation — Day 21, Week 5
+// -------------------------------------
+// Same shape and same reasoning as validateAssemblyModelLifecycle above --
+// qMatrixModels has no route yet either, so this is a self-contained
+// promotion validator rather than half of a route-plus-validator pair.
+export function validateQMatrixModelLifecycle(qMatrixModel, db = null, options = {}) {
+  const errors = [];
+  const status = qMatrixModel.status || "draft";
+
+  if (db && qMatrixModel.id) {
+    const existing = db.qMatrixModels?.find((m) => m.id === qMatrixModel.id);
+    if (existing && existing.status !== status && !canTransition(existing.status, status)) {
+      errors.push(`Illegal Q-matrix status transition: '${existing.status}' -> '${status}'.`);
+    }
+  }
+
+  /* REVIEWED */
+  if (["reviewed", "confirmed", "operational", "suspended"].includes(status)) {
+    if (!qMatrixModel.name) {
+      errors.push("Q-matrix must have a name before review.");
+    }
+    if (!qMatrixModel.competencyModelId) {
+      errors.push("Q-matrix must reference a competencyModelId before review.");
+    }
+    if (!Array.isArray(qMatrixModel.attributeIds) || qMatrixModel.attributeIds.length === 0) {
+      errors.push("Q-matrix must declare at least one attribute before review.");
+    }
+  }
+
+  /* CONFIRMED — an empty Q-matrix (attributes declared, no items mapped to
+     them yet) is not yet usable by a diagnostic model. */
+  if (["confirmed", "operational", "suspended"].includes(status)) {
+    if (!Array.isArray(qMatrixModel.entries) || qMatrixModel.entries.length === 0) {
+      errors.push("Q-matrix must declare at least one item-attribute entry before confirmation.");
+    }
+  }
+
+  /* ACTIVATION */
+  if (status === "operational" && db) {
+    const cm = db.competencyModels?.find((m) => m.id === qMatrixModel.competencyModelId);
+
+    if (!cm) {
+      errors.push(`Q-matrix cannot be activated: competency model '${qMatrixModel.competencyModelId}' not found.`);
+    } else {
+      if (cm.status !== "operational") {
+        errors.push(`Q-matrix cannot be activated: bound competency model must be operational first (found '${cm.status}').`);
+      }
+      if (qMatrixModel.competencyModelVersion !== cm.versionNumber) {
+        errors.push(`Q-matrix cannot be activated: competencyModelVersion (${qMatrixModel.competencyModelVersion}) does not match the competency model's current version (${cm.versionNumber}).`);
+      }
+    }
+  }
+
+  return errors;
+}
