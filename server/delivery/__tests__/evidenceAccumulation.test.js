@@ -156,6 +156,54 @@ describe("estimateContinuousPosterior — invariants any correct updater must sa
     expect(sharp.sd).toBeLessThan(flat.sd);
     expect(sharp.estimate).toBeGreaterThan(flat.estimate);
   });
+
+  it("with a guessing parameter, right/wrong is NOT antisymmetric -- a wrong answer is stronger evidence", () => {
+    // Day 32: the exact-antisymmetry invariant above holds only at c = 0.
+    // With c > 0 the model itself is asymmetric -- P(correct) is floored at
+    // c, so a WRONG answer rules out a wide swath of ability (nobody above
+    // the floor should have missed it) while a CORRECT answer is
+    // ambiguous (it might just be a guess). A right/wrong pair should
+    // therefore move the estimate DOWN more than symmetrically, not land
+    // back on the prior mean. If this ever comes out symmetric, `c` has
+    // silently stopped affecting the likelihood.
+    const q = standardQuadrature();
+    const guessing = { a: 1.5, b: 0, c: 0.25 };
+    const right = estimateContinuousPosterior([{ u: 1, params: guessing }], q);
+    const wrong = estimateContinuousPosterior([{ u: 0, params: guessing }], q);
+
+    expect(right.estimate + wrong.estimate).toBeLessThan(0);
+    // Both responses are still informative in their own right.
+    expect(right.estimate).toBeGreaterThan(0);
+    expect(wrong.estimate).toBeLessThan(0);
+  });
+
+  it("a mixed pattern of right and wrong responses lands between all-right and all-wrong", () => {
+    // Day 32: guards against an accumulation order bug -- log-likelihoods
+    // must SUM regardless of the sequence they arrive in, so interleaving
+    // matters only through the count of each outcome.
+    const q = standardQuadrature();
+    const allRight = estimateContinuousPosterior(
+      Array.from({ length: 10 }, () => ({ u: 1, params: RASCH })), q
+    );
+    const allWrong = estimateContinuousPosterior(
+      Array.from({ length: 10 }, () => ({ u: 0, params: RASCH })), q
+    );
+    const mixed = estimateContinuousPosterior(
+      Array.from({ length: 10 }, (_, i) => ({ u: i % 2, params: RASCH })), q
+    );
+    const shuffled = estimateContinuousPosterior(
+      [1, 0, 1, 1, 0, 0, 0, 1, 1, 0].map((u) => ({ u, params: RASCH })), q
+    );
+
+    expect(mixed.estimate).toBeGreaterThan(allWrong.estimate);
+    expect(mixed.estimate).toBeLessThan(allRight.estimate);
+    // A five-and-five split against a symmetric item's prior is the prior
+    // mean exactly, by the same antisymmetry as above.
+    expect(mixed.estimate).toBeCloseTo(0, 10);
+    // Order does not matter, only counts do.
+    expect(shuffled.estimate).toBeCloseTo(mixed.estimate, 12);
+    expect(shuffled.sd).toBeCloseTo(mixed.sd, 12);
+  });
 });
 
 /* ------------------------------------------------------------------
@@ -346,6 +394,26 @@ describe("grid adequacy — posteriors that used to be silently wrong", () => {
   it("reports boundaryLimited: false for an ordinary session", () => {
     const { posteriors } = accumulateEvidence(sessionWith([makeResponse()]), makeDb());
     expect(posteriors[0].boundaryLimited).toBe(false);
+  });
+
+  it("Day 32: widening and posterior-adaptive refinement compose correctly", () => {
+    // A case that needs BOTH fixes at once: the true posterior sits well
+    // outside the initial grid (forcing several widening doublings) AND
+    // ends up narrow enough, relative to the prior, that the widened grid's
+    // own step could not resolve it without the refinement pass on top.
+    // Each fix was verified in isolation; this pins that composing them
+    // doesn't reintroduce either defect (e.g. refining around an estimate
+    // that was itself still truncated).
+    const smv = continuousSmv({ priorDistribution: { family: "normal", params: { mean: 0, sd: 1 } } });
+    const observations = Array.from({ length: 300 }, () => ({ u: 1, params: { a: 4, b: 6 } }));
+
+    const mine = __testing__.estimateWithAdaptiveGrid(observations, smv);
+    const reference = referencePosterior(observations, { mean: 0, sd: 1, lo: -20, hi: 20, n: 80001 });
+
+    expect(reference.eap).toBeGreaterThan(4); // confirms the initial grid could not have reached it
+    expect(mine.boundaryLimited).toBe(false);
+    expect(mine.refined).toBe(true);
+    expectAgreesWithReference(mine, reference);
   });
 });
 

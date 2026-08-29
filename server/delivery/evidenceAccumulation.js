@@ -134,11 +134,6 @@ function normalLogDensity(x, mean, sd) {
 }
 
 /**
- * P(u = 1 | theta) under the 3PL family, which subsumes 2PL (c = 0) and
- * 1PL/Rasch (c = 0, a = 1). Missing parameters take those defaults, so a
- * Rasch parameter set carrying only `b` behaves exactly as Rasch.
- */
-/**
  * Is this a usable set of IRT parameters?
  *
  * schema.js validates `parameters` as an untyped object and nothing more,
@@ -158,6 +153,11 @@ function itemParametersAreUsable(params) {
   return true;
 }
 
+/**
+ * P(u = 1 | theta) under the 3PL family, which subsumes 2PL (c = 0) and
+ * 1PL/Rasch (c = 0, a = 1). Missing parameters take those defaults, so a
+ * Rasch parameter set carrying only `b` behaves exactly as Rasch.
+ */
 function itemProbability(theta, params) {
   const a = Number.isFinite(params?.a) ? params.a : 1;
   const b = Number.isFinite(params?.b) ? params.b : 0;
