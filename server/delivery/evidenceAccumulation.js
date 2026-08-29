@@ -1,0 +1,838 @@
+// server/delivery/evidenceAccumulation.js
+//
+// Day 31 (Week 7): Evidence Accumulation (build reference Part 2, Step 26).
+// Takes the Observable Variable values Evidence Identification produced
+// (Day 27, stored on session.responses since Day 28) and applies the
+// measurement model to update the Student Model Variable's DISTRIBUTION --
+// an estimate AND its precision, never a bare point estimate.
+//
+// The build reference singles this file out as the highest-risk code in
+// the system, at its highest effort tier, for one reason: "wrong posteriors
+// look entirely plausible." A theta of 0.83 with an SE of 0.41 looks
+// exactly as credible whether the math is right or wrong. Everything below
+// is written on that assumption -- the arithmetic is conservative, every
+// modelling assumption is named rather than implied, and every case this
+// module cannot handle correctly returns an explicit `supported: false`
+// rather than a number that would be believed.
+//
+// THREE DECISIONS WORTH READING BEFORE CHANGING ANYTHING HERE
+//
+// 1. Parameters come from the parameter set the response was ACTUALLY
+//    SCORED AGAINST (`response.parameterSetId`, recorded at submit time in
+//    Day 28), not from whichever set happens to be active now. ADR 0003's
+//    rule is that a calibrated value is resolved live by pointer and never
+//    cached -- this honours that (the pointer is still resolved live) while
+//    keeping the posterior REPRODUCIBLE from the stored responses alone. If
+//    this read the currently-active set instead, recalibrating an Evidence
+//    Model would silently change the historical estimate of every session
+//    that ever used it, with no record that it had moved.
+//
+// 2. An observable's evidence-rule DIRECTION is honoured, not assumed.
+//    A `supports` observable that activates is evidence of higher ability
+//    (u=1); a `weakens` observable that activates is evidence of LOWER
+//    ability (u=0), and vice versa. Treating every activation as u=1 -- the
+//    obvious shortcut -- would silently invert the contribution of every
+//    weakens-direction observable in the model. `neutral` carries no
+//    directional information and is excluded rather than guessed at.
+//
+// 3. An unmatched response (`activated: null`, Day 27's "the work product
+//    matched no declared pattern") is EXCLUDED, not scored as incorrect.
+//    "We could not tell what this response means" and "the student got it
+//    wrong" are different facts, and conflating them biases every estimate
+//    downward in exactly the situations where the item bank is weakest.
+
+import { SM_VARIABLE_TYPE_VALUES } from "../../src/utils/ecdVocabulary.js";
+
+/* Families that update a CONTINUOUS latent variable via a posterior over
+   theta. Everything else dispatches to an explicit not-yet-supported
+   result -- see the dispatch table at the bottom of this file. */
+const CONTINUOUS_MODEL_FAMILIES = ["irt", "rasch"];
+
+/* QUADRATURE GRID SIZING -- Day 31, hardened after an adversarial pass.
+
+   The obvious implementation (a fixed 41 points over a fixed [-4, 4]) is
+   wrong in two directions, and both failures are silent:
+
+   RESOLUTION. If the point COUNT is fixed while the range varies, the step
+   size is uncontrolled. A competency model that declares a wide scale --
+   say theta in [-100, 100], a perfectly reasonable authoring choice -- got
+   a step of 5.0 against a prior SD of 1.0. Only a couple of nodes carried
+   any mass at all, the recovered prior SD was 0.014 instead of 1.0, and a
+   correct answer moved the estimate by 0.000 instead of 0.41. The grid is
+   therefore sized by STEP, not by count: fine enough to resolve the prior
+   (a quarter of its SD), with the count falling out of the range.
+
+   COVERAGE. A grid that stops at +4 cannot represent a posterior centred
+   past +4, and truncating one does not fail loudly -- it reports the edge
+   as though it were the answer. Measured: 400 consecutive correct Rasch
+   responses returned 3.90 +/- 0.15 where the true posterior is 4.55 +/-
+   0.44. Both numbers are wrong, and the SD is wrong in the dangerous
+   direction: a truncated posterior looks THREE TIMES more precise than the
+   real one, because the tail that carries the uncertainty was cut off.
+   So the grid is widened adaptively while meaningful mass sits on its
+   boundary, and if it still does at the widest allowed span the result
+   carries `boundaryLimited: true` rather than pretending to be a point
+   measurement. */
+const PRIOR_SPREAD_FACTOR = 5;        // initial half-width, in prior SDs
+/* The widening cap is ABSOLUTE, not a multiple of the prior SD.
+
+   Capping at "40 prior SDs" sounds scale-free but is not: with a tight
+   prior (sd = 0.1) it stops the grid at +/-4 in absolute terms, so data
+   centred on an item of difficulty b = 5 can never be reached however many
+   times the loop widens. Measured: a N(0, 0.1) prior with 1000 correct
+   responses at b = 5 settled at 3.9998 +/- 0.0016 against a true posterior
+   of 5.000 +/- 0.054 -- honestly flagged boundaryLimited, but still the
+   wrong number when the right one was reachable. Theta is a logit scale;
+   +/-100 logits is far past anything psychometrically meaningful. */
+const MAX_ABSOLUTE_HALF_WIDTH = 100;
+/* Resolution: step ~= prior SD / 8. The grid is sized from the PRIOR's
+   width, but evidence narrows the POSTERIOR below it, so the effective
+   resolution degrades over a long session -- measured discretisation error
+   rose from ~1e-6 (one response) to ~1.6e-5 (ten) at sd/4. Nodes are
+   cheap; halving the step quarters that error (it falls with step^2) for
+   twice the arithmetic on an array of tens of elements. */
+const STEPS_PER_PRIOR_SD = 8;
+const MIN_GRID_POINTS = 41;
+const MAX_GRID_POINTS = 801;          // bounds the cost in a request path
+const EDGE_MASS_TOLERANCE = 1e-4;     // posterior mass allowed on the boundary
+const MAX_WIDENING_ATTEMPTS = 10;
+/* Below this, the log-likelihood is identical at every node to within
+   floating-point noise, i.e. the data has not discriminated between any
+   two candidate abilities. See criterion 3 in estimateWithAdaptiveGrid. */
+const FLAT_LIKELIHOOD_EPSILON = 1e-9;
+/* If the posterior spans fewer than this many grid steps, the grid cannot
+   resolve its own answer and is re-measured around the located posterior.
+   See the REFINEMENT note in estimateWithAdaptiveGrid. */
+const MIN_STEPS_PER_POSTERIOR_SD = 8;
+const POSTERIOR_REFINEMENT_SPREAD = 10;  // half-width, in posterior SDs
+
+/* Probabilities are clamped away from exactly 0 and 1 before taking a
+   log. A 3PL with c=0 at extreme theta genuinely returns 0 or 1 in
+   floating point, and log(0) = -Infinity would poison the whole grid
+   rather than just that node. */
+const P_EPSILON = 1e-12;
+
+function normalDensity(x, mean, sd) {
+  const z = (x - mean) / sd;
+  return Math.exp(-0.5 * z * z) / (sd * Math.sqrt(2 * Math.PI));
+}
+
+/* The LOG prior density, carried alongside the linear one.
+
+   Re-centring only the likelihood in log space is a half-done fix. The
+   prior weight is itself an exp() that underflows: at 40 prior SDs it is
+   exp(-800), i.e. exactly 0 in a double. A posterior whose joint
+   log-density peaks at a perfectly representable -1943 was therefore
+   computed as 0 x 0 at every node and refused as "could not be
+   normalised" -- measured on a N(0, 0.1) prior with 1000 correct
+   responses to a b=5 item, whose true posterior is an unremarkable
+   5.000 +/- 0.054. Prior and likelihood are now combined in log space and
+   re-centred together, so only the JOINT has to be representable. */
+function normalLogDensity(x, mean, sd) {
+  const z = (x - mean) / sd;
+  return -0.5 * z * z - Math.log(sd) - 0.5 * Math.log(2 * Math.PI);
+}
+
+/**
+ * P(u = 1 | theta) under the 3PL family, which subsumes 2PL (c = 0) and
+ * 1PL/Rasch (c = 0, a = 1). Missing parameters take those defaults, so a
+ * Rasch parameter set carrying only `b` behaves exactly as Rasch.
+ */
+/**
+ * Is this a usable set of IRT parameters?
+ *
+ * schema.js validates `parameters` as an untyped object and nothing more,
+ * so a calibration file can deliver arithmetically valid but
+ * psychometrically meaningless values, and every one of them produces a
+ * confident-looking estimate. Measured, all reported `supported: true`
+ * with no warning: a = 0 returns the prior verbatim (the item carries no
+ * information at all); a = -1 INVERTS the item, so twenty correct answers
+ * reported theta = -2.214; c >= 1 makes the response certain regardless of
+ * ability, again returning the prior. Excluded and warned about instead.
+ */
+function itemParametersAreUsable(params) {
+  if (!params || typeof params !== "object") return false;
+  if (params.a !== undefined && !(Number.isFinite(params.a) && params.a > 0)) return false;
+  if (params.b !== undefined && !Number.isFinite(params.b)) return false;
+  if (params.c !== undefined && !(Number.isFinite(params.c) && params.c >= 0 && params.c < 1)) return false;
+  return true;
+}
+
+function itemProbability(theta, params) {
+  const a = Number.isFinite(params?.a) ? params.a : 1;
+  const b = Number.isFinite(params?.b) ? params.b : 0;
+  const c = Number.isFinite(params?.c) ? params.c : 0;
+
+  // 1 / (1 + exp(-x)) is written this way rather than via Math.exp(-x)
+  // alone so that a large positive exponent saturates to 0 instead of
+  // producing Infinity/Infinity = NaN.
+  const x = a * (theta - b);
+  const p = x >= 0 ? 1 / (1 + Math.exp(-x)) : Math.exp(x) / (1 + Math.exp(x));
+
+  return c + (1 - c) * p;
+}
+
+/**
+ * The quadrature grid and its prior weights, derived from the SMV's own
+ * declared priorDistribution (Day 16) rather than a hardcoded N(0,1).
+ * Returns null when the prior family is one this module cannot build a
+ * continuous grid for -- the caller turns that into an explicit
+ * unsupported result rather than silently falling back to a default prior,
+ * which would report a posterior the author never asked for.
+ */
+function buildQuadrature(smVariable, options = {}) {
+  const prior = smVariable?.priorDistribution;
+  const family = prior?.family;
+  const params = prior?.params || {};
+  const spreadFactor = Number.isFinite(options.spreadFactor)
+    ? options.spreadFactor
+    : PRIOR_SPREAD_FACTOR;
+
+  let min;
+  let max;
+  let referenceSd;
+  let densityAt;
+  let logDensityAt;
+  let canWiden;
+
+  if (family === "normal") {
+    const mean = Number.isFinite(params.mean) ? params.mean : 0;
+    /* A declared-but-degenerate sd (0, negative, NaN) is refused rather
+       than quietly replaced with 1. Substituting a default here would
+       report a posterior against a prior the author never specified,
+       under their variable's name. */
+    if (params.sd !== undefined && !(Number.isFinite(params.sd) && params.sd > 0)) return null;
+    const sd = Number.isFinite(params.sd) ? params.sd : 1;
+
+    /* The grid is spanned by the PRIOR, deliberately not by the SMV's
+       declared `scale`. `scale` states the range over which the variable
+       is meaningful to the author -- it is not a quadrature parameter, and
+       treating it as one is what let a wide declared scale destroy the
+       resolution (see the header note). */
+    min = mean - spreadFactor * sd;
+    max = mean + spreadFactor * sd;
+    referenceSd = sd;
+    densityAt = (x) => normalDensity(x, mean, sd);
+    logDensityAt = (x) => normalLogDensity(x, mean, sd);
+    canWiden = true;
+  } else if (family === "uniform") {
+    const lo = Number.isFinite(params.min) ? params.min : null;
+    const hi = Number.isFinite(params.max) ? params.max : null;
+    if (lo === null || hi === null || !(hi > lo)) return null;
+    min = lo;
+    max = hi;
+    /* Resolution for a uniform prior is driven by the LIKELIHOOD's scale,
+       not the prior's own SD.
+
+       The obvious choice -- (hi - lo) / sqrt(12), a uniform's actual SD --
+       is subtly catastrophic: it is PROPORTIONAL TO THE SPAN, so the
+       target step scales with the span too and the node count comes out
+       at a constant 29 for every possible uniform prior. That is below
+       MIN_GRID_POINTS, so the clamp always binds and every uniform prior
+       silently gets a fixed 41 points -- exactly the "fixed count,
+       variable step" design this whole block exists to avoid, reintroduced
+       through the one branch the original fix did not touch. Measured on
+       uniform [-20, 20] with 200 responses: a reported standard error of
+       2e-19 for a true posterior SD of 0.0709.
+       (Found by an adversarial review; see the regression tests.)
+
+       Theta is on a logit scale, where an item response function varies
+       over a range of roughly 1/a. A step near an eighth of a logit
+       resolves any plausibly-discriminating item regardless of how wide
+       the author drew the prior's support. */
+    referenceSd = 1;
+    densityAt = () => 1;
+    logDensityAt = () => 0;
+    // A uniform prior is exactly zero outside its support, so no amount of
+    // likelihood can move the posterior past it -- widening is meaningless
+    // here, and a boundary-limited result is a property of the prior the
+    // author chose rather than a defect in the grid.
+    canWiden = false;
+  } else {
+    return null;
+  }
+
+  /* An explicit re-centring, used by the refinement pass. Clamped to the
+     prior's own support -- a uniform prior is exactly zero outside it, so
+     a refined grid straying past it would carry no mass at all. */
+  if (Number.isFinite(options.center) && Number.isFinite(options.halfWidth) && options.halfWidth > 0) {
+    const lo = options.center - options.halfWidth;
+    const hi = options.center + options.halfWidth;
+    min = canWiden ? lo : Math.max(min, lo);
+    max = canWiden ? hi : Math.min(max, hi);
+  }
+
+  const span = max - min;
+  if (!(span > 0) || !Number.isFinite(span)) return null;
+
+  /* Size by STEP, not by count. */
+  let points;
+  let resolutionLimited = false;
+  if (Number.isInteger(options.gridPoints) && options.gridPoints >= 3) {
+    // An explicit override is still capped: MAX_GRID_POINTS is a cost
+    // bound on a request path, and an uncapped count overflowed the
+    // argument limit of Math.max(...array) at ~1e5 nodes.
+    points = Math.min(options.gridPoints, MAX_GRID_POINTS);
+  } else {
+    const targetStep = Number.isFinite(options.targetStep) && options.targetStep > 0
+      ? options.targetStep
+      : referenceSd / STEPS_PER_PRIOR_SD;
+    const needed = Math.ceil(span / targetStep) + 1;
+    points = Math.min(Math.max(needed, MIN_GRID_POINTS), MAX_GRID_POINTS);
+    // When the cost cap binds, the step is coarser than the accuracy
+    // target -- the caller is told rather than left to assume otherwise.
+    resolutionLimited = needed > MAX_GRID_POINTS;
+  }
+  // An even count would straddle a symmetric prior's mean rather than
+  // landing on it; an odd count keeps the centre as an actual node.
+  if (points % 2 === 0) points += 1;
+
+  const step = span / (points - 1);
+
+  const nodes = [];
+  const rawWeights = [];
+  const logWeights = [];
+  for (let i = 0; i < points; i += 1) {
+    // Anchor the last node exactly on `max` rather than accumulating
+    // `min + i * step`, so a uniform prior's declared endpoints survive
+    // floating-point drift exactly.
+    const theta = i === points - 1 ? max : min + i * step;
+    nodes.push(theta);
+    rawWeights.push(densityAt(theta));
+    logWeights.push(logDensityAt(theta));
+  }
+
+  const totalWeight = rawWeights.reduce((acc, w) => acc + w, 0);
+  if (!(totalWeight > 0) || !Number.isFinite(totalWeight)) return null;
+
+  return {
+    nodes,
+    weights: rawWeights.map((w) => w / totalWeight),
+    logWeights,
+    meta: { min, max, step, points, referenceSd, spreadFactor, canWiden, resolutionLimited },
+  };
+}
+
+/**
+ * Estimate the posterior, widening the grid while meaningful probability
+ * mass is still sitting on its boundary.
+ *
+ * This exists because a truncated posterior fails SILENTLY and in the
+ * dangerous direction -- see the coverage note in the header constants.
+ * When the grid cannot be widened further (a uniform prior's support, or
+ * the maximum span), the result is still returned but carries
+ * `boundaryLimited: true` so a caller can tell "the ability is at least
+ * this high" apart from "the ability is this high".
+ */
+function estimateWithAdaptiveGrid(scoredObservations, smVariable, options = {}) {
+  let spreadFactor = PRIOR_SPREAD_FACTOR;
+  let last = null;
+
+  for (let attempt = 0; attempt < MAX_WIDENING_ATTEMPTS; attempt += 1) {
+    const quadrature = buildQuadrature(smVariable, { ...options, spreadFactor });
+    if (!quadrature) return null;
+
+    const result = estimateContinuousPosterior(scoredObservations, quadrature);
+    if (!result) return null;
+
+    const posterior = result.posterior;
+    const n = posterior.length;
+
+    /* THREE independent ways a grid can fail to contain the answer. The
+       first was the only one originally checked, and on its own it is
+       close to useless for a normal prior.
+
+       1. EDGE MASS. Mass piled up on the outermost nodes.
+       2. MODE AT THE BOUNDARY. For a normal prior the edge weights
+          UNDERFLOW TO EXACTLY ZERO once the grid reaches ~40 SDs
+          (exp(-800) is 0 in a double), so criterion 1 becomes identically
+          0 <= tolerance and `boundaryLimited` could never fire at all --
+          measured across ~2,700 normal-prior configurations, it never once
+          did. A posterior whose MODE sits on the first or last node is
+          truncated whatever its edge mass says.
+       3. A FLAT LIKELIHOOD. If every node returns the same log-likelihood
+          the data has not discriminated between any of them, so the
+          posterior is just the prior wearing a measurement's clothes. This
+          happens when the item parameters place all of the likelihood's
+          mass outside the current grid entirely: every probability clamps
+          to the same P_EPSILON floor, the likelihood goes flat, and -- the
+          sharp edge -- edge mass then looks REASSURINGLY SMALL, so the
+          condition that should have triggered widening was the one
+          silencing it. Measured: a=3, b=14.5 returned 0.000 +/- 1.000
+          (the prior verbatim, flagged `supported: true`) where the truth
+          was 15.501 +/- 0.156. */
+    const edgeMass = posterior[0] + posterior[n - 1];
+    const modeAtBoundary = result.modeIndex === 0 || result.modeIndex === n - 1;
+    const likelihoodIsFlat =
+      scoredObservations.length > 0 && result.logLikelihoodRange < FLAT_LIKELIHOOD_EPSILON;
+
+    const inadequate = edgeMass > EDGE_MASS_TOLERANCE || modeAtBoundary || likelihoodIsFlat;
+
+    last = {
+      ...result,
+      edgeMass,
+      gridMeta: quadrature.meta,
+      modeAtBoundary,
+      likelihoodIsFlat,
+    };
+
+    if (!inadequate) {
+      /* REFINEMENT. The grid is sized from the PRIOR's width, but evidence
+         narrows the POSTERIOR below it -- and a step chosen for the prior
+         can be coarser than the whole posterior it is now trying to
+         measure. Measured on a uniform [-20, 20] prior with 200 responses:
+         a step of 0.125 against a true posterior SD of 0.0709, i.e. the
+         grid could not resolve its own answer, reporting 0.0693 (2.3% low).
+         Having located the posterior on the coarse pass, re-measure it on
+         a grid centred and sized on the posterior itself. */
+      const stepsAcrossPosterior = result.sd / quadrature.meta.step;
+
+      if (stepsAcrossPosterior >= MIN_STEPS_PER_POSTERIOR_SD || !(result.sd > 0)) {
+        return { ...last, boundaryLimited: false };
+      }
+
+      const refined = buildQuadrature(smVariable, {
+        ...options,
+        center: result.estimate,
+        halfWidth: Math.max(result.sd * POSTERIOR_REFINEMENT_SPREAD, quadrature.meta.step),
+        targetStep: result.sd / STEPS_PER_PRIOR_SD,
+      });
+
+      if (!refined) return { ...last, boundaryLimited: false };
+
+      const remeasured = estimateContinuousPosterior(scoredObservations, refined);
+
+      if (!remeasured) return { ...last, boundaryLimited: false };
+
+      return {
+        ...remeasured,
+        edgeMass,
+        gridMeta: refined.meta,
+        modeAtBoundary: false,
+        likelihoodIsFlat: false,
+        boundaryLimited: false,
+        refined: true,
+      };
+    }
+
+    const halfWidth = spreadFactor * quadrature.meta.referenceSd;
+    if (!quadrature.meta.canWiden || halfWidth >= MAX_ABSOLUTE_HALF_WIDTH) break;
+
+    const maxSpreadFactor = MAX_ABSOLUTE_HALF_WIDTH / quadrature.meta.referenceSd;
+    spreadFactor = Math.min(spreadFactor * 2, maxSpreadFactor);
+  }
+
+  /* Widened as far as allowed and the grid still does not contain the
+     answer. A flat likelihood at this point means the estimate is the
+     prior with no data in it -- that is not a measurement and must not be
+     returned as one; the caller turns a null into an explicit refusal. */
+  if (last?.likelihoodIsFlat) return null;
+
+  return last ? { ...last, boundaryLimited: true } : null;
+}
+
+/**
+ * Turn one stored session response into a scored 0/1 observation, or null
+ * if it carries no usable information. See decisions 2 and 3 in the header
+ * -- this is where direction is honoured and unmatched responses are
+ * excluded rather than counted as wrong.
+ */
+function scoreResponse(response) {
+  if (response?.activated !== true && response?.activated !== false) {
+    return { u: null, reason: "indeterminate" };
+  }
+
+  const direction = response.direction;
+
+  if (direction === "supports") return { u: response.activated ? 1 : 0 };
+  if (direction === "weakens") return { u: response.activated ? 0 : 1 };
+  if (direction === "neutral") return { u: null, reason: "neutral" };
+
+  return { u: null, reason: "unknown-direction" };
+}
+
+/**
+ * EAP (expected a posteriori) estimate of a continuous SMV, with its
+ * posterior standard deviation as the precision.
+ *
+ * The likelihood is accumulated in LOG space and the maximum subtracted
+ * before exponentiating. With even a few dozen items the raw product of
+ * probabilities underflows to exactly 0 at every node, at which point the
+ * normalisation is 0/0 and the estimate is NaN -- or, worse in a language
+ * that tolerates it, silently the prior mean. Working in log space and
+ * re-centring keeps the whole grid representable however long the session
+ * gets.
+ */
+function estimateContinuousPosterior(scoredObservations, quadrature) {
+  const { nodes, weights } = quadrature;
+
+  const logLikelihood = nodes.map((theta) =>
+    scoredObservations.reduce((acc, obs) => {
+      const p = itemProbability(theta, obs.params);
+      const clamped = Math.min(Math.max(p, P_EPSILON), 1 - P_EPSILON);
+      return acc + (obs.u === 1 ? Math.log(clamped) : Math.log(1 - clamped));
+    }, 0)
+  );
+
+  let maxLogLikelihood = -Infinity;
+  let minLogLikelihood = Infinity;
+  for (const ll of logLikelihood) {
+    if (ll > maxLogLikelihood) maxLogLikelihood = ll;
+    if (ll < minLogLikelihood) minLogLikelihood = ll;
+  }
+
+  /* Combine prior and likelihood in LOG space and re-centre the JOINT, so
+     that only the joint density has to be representable. Re-centring the
+     likelihood alone (and multiplying by a linear prior weight that has
+     itself underflowed to 0) is the half-done version -- see
+     normalLogDensity's note. `logWeights` is absent only for a
+     hand-constructed quadrature in a unit test, where the linear weights
+     are well-scaled by construction. */
+  const logPrior = quadrature.logWeights;
+
+  const logJoint = logPrior
+    ? logLikelihood.map((ll, i) => ll + logPrior[i])
+    : logLikelihood.map((ll, i) => ll + Math.log(weights[i]));
+
+  let maxLogJoint = -Infinity;
+  for (const lj of logJoint) if (lj > maxLogJoint) maxLogJoint = lj;
+
+  if (!Number.isFinite(maxLogJoint)) return null;
+
+  const unnormalized = logJoint.map((lj) => Math.exp(lj - maxLogJoint));
+
+  const total = unnormalized.reduce((acc, v) => acc + v, 0);
+
+  if (!(total > 0) || !Number.isFinite(total)) return null;
+
+  const posterior = unnormalized.map((v) => v / total);
+
+  const estimate = nodes.reduce((acc, theta, i) => acc + theta * posterior[i], 0);
+
+  const variance = nodes.reduce(
+    (acc, theta, i) => acc + (theta - estimate) ** 2 * posterior[i],
+    0
+  );
+
+  // Guard against a tiny negative from floating-point cancellation before
+  // taking a square root.
+  const sd = Math.sqrt(Math.max(variance, 0));
+
+  if (!Number.isFinite(estimate) || !Number.isFinite(sd)) return null;
+
+  /* The index of the posterior mode, and how flat the likelihood was
+     across the whole grid. Both are diagnostics the adaptive wrapper needs
+     to tell "this grid contains the answer" from "this grid is nowhere
+     near it" -- see estimateWithAdaptiveGrid. */
+  let modeIndex = 0;
+  for (let i = 1; i < posterior.length; i += 1) {
+    if (posterior[i] > posterior[modeIndex]) modeIndex = i;
+  }
+
+  return {
+    estimate,
+    sd,
+    posterior,
+    modeIndex,
+    logLikelihoodRange: maxLogLikelihood - minLogLikelihood,
+  };
+}
+
+/**
+ * Accumulate every usable response in a session into a posterior for the
+ * Student Model Variable they inform.
+ *
+ * Returns `{ posteriors, warnings }`. A posterior is only ever produced
+ * for a case this module can compute CORRECTLY; every other case appears
+ * as an entry with `supported: false` and a stated reason. That asymmetry
+ * is deliberate and is the single most important property of this file:
+ * an unsupported model family, an unresolvable parameter set, or an
+ * ambiguous SMV binding must never come back as a plausible number.
+ *
+ * @param {object} session - a sessions record, with `responses[]`
+ * @param {object} db - the full db snapshot
+ * @param {{ gridPoints?: number }} [options]
+ * @returns {{ posteriors: object[], warnings: string[] }}
+ */
+export function accumulateEvidence(session, db, options = {}) {
+  if (!session) throw new Error("accumulateEvidence requires a session.");
+  if (!db) throw new Error("accumulateEvidence requires a db snapshot.");
+
+  const warnings = [];
+  const responses = (session.responses || []).filter((r) => r && r.itemId);
+
+  if (responses.length === 0) {
+    return { posteriors: [], warnings };
+  }
+
+  /* Group by the Evidence Model each response was scored through. A
+     session can legitimately span several. */
+  const byEvidenceModel = new Map();
+  for (const r of responses) {
+    if (!r.evidenceModelId) {
+      warnings.push(`Response for item '${r.itemId}' has no evidenceModelId and cannot be accumulated.`);
+      continue;
+    }
+    if (!byEvidenceModel.has(r.evidenceModelId)) byEvidenceModel.set(r.evidenceModelId, []);
+    byEvidenceModel.get(r.evidenceModelId).push(r);
+  }
+
+  const posteriors = [];
+
+  for (const [evidenceModelId, group] of byEvidenceModel) {
+    const evidenceModel = (db.evidenceModels || []).find((em) => em.id === evidenceModelId);
+
+    if (!evidenceModel) {
+      posteriors.push({
+        evidenceModelId,
+        supported: false,
+        reason: `Evidence model '${evidenceModelId}' not found.`,
+      });
+      continue;
+    }
+
+    /* Resolve the statistical model by the parameter set the responses
+       were scored against -- decision 1 in the header. Responses in one
+       group may in principle cite different parameter sets (a session that
+       spanned a recalibration); that is a real situation and must not be
+       silently averaged over, so it is refused explicitly. */
+    const parameterSetIds = [...new Set(group.map((r) => r.parameterSetId).filter(Boolean))];
+
+    if (parameterSetIds.length === 0) {
+      posteriors.push({
+        evidenceModelId,
+        supported: false,
+        reason: `No response for evidence model '${evidenceModelId}' records the parameterSetId it was scored against.`,
+      });
+      continue;
+    }
+
+    if (parameterSetIds.length > 1) {
+      posteriors.push({
+        evidenceModelId,
+        supported: false,
+        reason: `Responses for evidence model '${evidenceModelId}' cite ${parameterSetIds.length} different parameter sets (${parameterSetIds.join(", ")}); a single posterior over mixed calibrations would not be interpretable.`,
+      });
+      continue;
+    }
+
+    const parameterSetId = parameterSetIds[0];
+
+    const statisticalModel = (evidenceModel.statisticalModels || []).find((sm) =>
+      (sm.parameterSets || []).some((ps) => ps.parameterSetId === parameterSetId)
+    );
+
+    if (!statisticalModel) {
+      posteriors.push({
+        evidenceModelId,
+        parameterSetId,
+        supported: false,
+        reason: `No statistical model on evidence model '${evidenceModelId}' owns parameter set '${parameterSetId}'.`,
+      });
+      continue;
+    }
+
+    const family = statisticalModel.type;
+
+    if (!CONTINUOUS_MODEL_FAMILIES.includes(family)) {
+      /* The per-family dispatch the build reference calls for. DINA/G-DINA
+         attribute-mastery updating and CTT/sum/threshold aggregation are
+         Week 8; until they exist, saying so is the only honest output. */
+      posteriors.push({
+        evidenceModelId,
+        parameterSetId,
+        modelFamily: family,
+        supported: false,
+        reason: `Accumulation for the '${family}' model family is not implemented yet; no estimate is produced.`,
+      });
+      continue;
+    }
+
+    const parameterSet = statisticalModel.parameterSets.find(
+      (ps) => ps.parameterSetId === parameterSetId
+    );
+
+    /* Which SMV does this inform? Nothing in the schema yet declares the
+       observable -> SMV binding (that is Day 34). Until it does, the only
+       case that can be resolved WITHOUT GUESSING is a competency model
+       carrying exactly one continuous SMV. Anything else is refused. */
+    const smvResolution = resolveContinuousSmVariable(evidenceModel, statisticalModel, db);
+
+    if (!smvResolution.smVariable) {
+      posteriors.push({
+        evidenceModelId,
+        parameterSetId,
+        modelFamily: family,
+        supported: false,
+        reason: smvResolution.reason,
+      });
+      continue;
+    }
+
+    const smVariable = smvResolution.smVariable;
+    const quadrature = buildQuadrature(smVariable, options);
+
+    if (!quadrature) {
+      posteriors.push({
+        evidenceModelId,
+        parameterSetId,
+        modelFamily: family,
+        smvId: smVariable.id,
+        supported: false,
+        reason: `Student Model Variable '${smVariable.id}' has no prior distribution this module can build a continuous quadrature grid from (family '${smVariable.priorDistribution?.family}').`,
+      });
+      continue;
+    }
+
+    /* Score each response and attach its item parameters. */
+    const scoredObservations = [];
+    let excluded = 0;
+
+    for (const r of group) {
+      const { u, reason } = scoreResponse(r);
+
+      if (u === null) {
+        excluded += 1;
+        if (reason === "unknown-direction") {
+          warnings.push(`Response for item '${r.itemId}' has no usable evidence-rule direction ('${r.direction}') and was excluded.`);
+        }
+        continue;
+      }
+
+      const params = parameterSet?.parameters?.[r.observableId];
+
+      if (!params) {
+        excluded += 1;
+        warnings.push(`Parameter set '${parameterSetId}' has no parameters for observable '${r.observableId}'; that response was excluded.`);
+        continue;
+      }
+
+      if (!itemParametersAreUsable(params)) {
+        excluded += 1;
+        warnings.push(`Parameter set '${parameterSetId}' has unusable IRT parameters for observable '${r.observableId}' (a must be > 0, c in [0,1)); that response was excluded.`);
+        continue;
+      }
+
+      scoredObservations.push({ u, params, observableId: r.observableId, itemId: r.itemId });
+    }
+
+    if (scoredObservations.length === 0) {
+      posteriors.push({
+        evidenceModelId,
+        parameterSetId,
+        modelFamily: family,
+        smvId: smVariable.id,
+        supported: false,
+        reason: `No response for evidence model '${evidenceModelId}' carried usable directional evidence; the prior is unchanged, so no posterior is reported.`,
+      });
+      continue;
+    }
+
+    const result = estimateWithAdaptiveGrid(scoredObservations, smVariable, options);
+
+    if (!result) {
+      posteriors.push({
+        evidenceModelId,
+        parameterSetId,
+        modelFamily: family,
+        smvId: smVariable.id,
+        supported: false,
+        reason: "The posterior could not be normalised (no quadrature node carried usable probability mass).",
+      });
+      continue;
+    }
+
+    posteriors.push({
+      smvId: smVariable.id,
+      smvType: smVariable.type,
+      evidenceModelId,
+      parameterSetId,
+      modelFamily: family,
+      method: "eap",
+      supported: true,
+      estimate: result.estimate,
+      // Posterior SD -- the standard error of the EAP estimate. Reported
+      // under both names because "precision" is the contract the build
+      // reference states and "sem" is what a psychometrician will look for.
+      precision: result.sd,
+      sem: result.sd,
+      responsesUsed: scoredObservations.length,
+      responsesExcluded: excluded,
+      /* True when the posterior still had meaningful mass on the widest
+         grid's boundary -- the estimate is then a bound, not a point
+         measurement, and the precision beside it understates the real
+         uncertainty. Callers that report an estimate to a human should
+         say so. */
+      boundaryLimited: result.boundaryLimited === true,
+    });
+  }
+
+  return { posteriors, warnings };
+}
+
+/**
+ * Day 31 scope: resolve the SMV a continuous statistical model updates,
+ * WITHOUT guessing. An explicit binding is honoured if one is present
+ * (forward-compatible with Day 34, which makes that binding a real,
+ * validated field); otherwise the only unambiguous case is a competency
+ * model with exactly one continuous SMV.
+ */
+function resolveContinuousSmVariable(evidenceModel, statisticalModel, db) {
+  const competency = (db.competencies || []).find((c) => c.id === evidenceModel.competencyId);
+
+  if (!competency) {
+    return { reason: `Evidence model '${evidenceModel.id}' references competency '${evidenceModel.competencyId}', which was not found.` };
+  }
+
+  const competencyModel = (db.competencyModels || []).find((m) => m.id === competency.modelId);
+
+  if (!competencyModel) {
+    return { reason: `Competency '${competency.id}' references competency model '${competency.modelId}', which was not found.` };
+  }
+
+  const smVariables = competencyModel.smVariables || [];
+
+  if (smVariables.length === 0) {
+    return { reason: `Competency model '${competencyModel.id}' declares no smVariables, so there is nothing to accumulate into.` };
+  }
+
+  const declaredId = statisticalModel.structureConfig?.smvId;
+
+  if (declaredId) {
+    const bound = smVariables.find((smv) => smv.id === declaredId);
+    if (!bound) {
+      return { reason: `Statistical model '${statisticalModel.id}' declares smvId '${declaredId}', which competency model '${competencyModel.id}' does not define.` };
+    }
+    if (bound.type !== "continuous") {
+      return { reason: `Statistical model '${statisticalModel.id}' is a continuous family but is bound to '${bound.id}', a '${bound.type}' Student Model Variable.` };
+    }
+    return { smVariable: bound };
+  }
+
+  const continuous = smVariables.filter((smv) => smv.type === "continuous");
+
+  if (continuous.length === 1) return { smVariable: continuous[0] };
+
+  if (continuous.length === 0) {
+    return { reason: `Competency model '${competencyModel.id}' declares no continuous Student Model Variable for a '${statisticalModel.type}' model to update.` };
+  }
+
+  return {
+    reason: `Competency model '${competencyModel.id}' declares ${continuous.length} continuous Student Model Variables and statistical model '${statisticalModel.id}' does not say which it updates (structureConfig.smvId). Refusing to guess.`,
+  };
+}
+
+/* Exported for direct unit testing of the arithmetic -- the posterior is
+   the thing most worth testing in isolation, since an error in it is
+   invisible at every layer above. */
+export const __testing__ = {
+  itemProbability,
+  itemParametersAreUsable,
+  buildQuadrature,
+  scoreResponse,
+  estimateContinuousPosterior,
+  estimateWithAdaptiveGrid,
+  normalDensity,
+  CONTINUOUS_MODEL_FAMILIES,
+  SM_VARIABLE_TYPE_VALUES,
+};
