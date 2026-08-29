@@ -18,6 +18,7 @@ export const rolePermissions = {
       "tasks",
       "sessions",
       "policies",
+      "curricularPolicies",
       "reports",
       "students",
       "teachers",
@@ -31,6 +32,7 @@ export const rolePermissions = {
       "items",
       "tasks",
       "policies",
+      "curricularPolicies",
       "users"
     ],
     canApprove: ["questions", "items"], // promote from review → confirmed
@@ -42,8 +44,16 @@ export const rolePermissions = {
       "items",
       "tasks",
       "policies",
-      "users"
+      "curricularPolicies",
+      "users",
+      "students"
     ],
+    // "students" was declared in canView but never in canCreate/canDelete
+    // on any role, while studentsRoutes.js accepted any authenticated
+    // caller -- the RBAC sweep found this the same way it found items/
+    // student being absent before. Admin-only until a real enrollment
+    // workflow exists for district/teacher.
+    canCreate: ["students"],
   },
 
   district: {

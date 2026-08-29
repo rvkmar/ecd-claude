@@ -3,6 +3,7 @@ import SessionList from "./SessionList";
 import SessionForm from "./SessionForm";
 import SessionReport from "./SessionReport";
 import NavBar from "../ui/NavBar";
+import { SESSION_STATUS } from "@/utils/sessionStatus";
 import Modal from "../ui/Modal";
 import toast from "react-hot-toast";
 
@@ -227,7 +228,7 @@ export default function SessionBuilder({ notify }) {
                 studentId: students[0]?.id || "",
                 selectionStrategy: "fixed",
                 nextTaskPolicy: {},
-                status: "in-progress",
+                status: SESSION_STATUS.IN_PROGRESS,
               })
             }
           >

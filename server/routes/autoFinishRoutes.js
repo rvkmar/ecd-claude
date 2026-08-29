@@ -1,15 +1,22 @@
  // server/routes/autoFinishRoutes.js
+ //
+ // Not currently mounted in server/index.js. Gated anyway: an unmounted
+ // route file is one accidental `app.use()` away from being live, and an
+ // ungated admin sweep / force-finish is exactly the kind of gap that
+ // slipped through before the RBAC sweep found it in the mounted routers.
  import express from "express";
+ import { authenticateToken, authorizeRole } from "../utils/authMiddleware.js";
  import { autoFinishDueSessions } from "../utils/autoFinish.js";
  import { loadDB, saveDB } from "../../src/utils/db-server.js";
- 
+
  const router = express.Router();
- 
+ router.use(authenticateToken);
+
  // ------------------------------
  // POST /api/admin/auto-finish/run
- // Run sweeping job immediately (admin only ideally)
+ // Run sweeping job immediately (admin only)
  // ------------------------------
- router.post("/admin/auto-finish/run", (req, res) => {
+ router.post("/admin/auto-finish/run", authorizeRole(["admin"]), (req, res) => {
    try {
      const changed = autoFinishDueSessions();
      res.json({ success: true, changed });
@@ -23,7 +30,7 @@
  // POST /api/sessions/:id/force-finish
  // Teacher/admin can force finish a session
  // ------------------------------
- router.post("/sessions/:id/force-finish", (req, res) => {
+ router.post("/sessions/:id/force-finish", authorizeRole(["admin", "teacher"]), (req, res) => {
    const { id } = req.params;
    const db = loadDB();
  

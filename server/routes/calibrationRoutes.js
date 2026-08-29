@@ -1,6 +1,6 @@
 // server/routes/calibrationRoutes.js
 import express from "express";
-import { authenticateToken } from "../utils/authMiddleware.js";
+import { authenticateToken, authorizeRole } from "../utils/authMiddleware.js";
 import { loadDB, saveDB } from "../../src/utils/db-server.js";
 
 const router = express.Router();
@@ -10,11 +10,16 @@ const router = express.Router();
 // Phase 1 security hardening pass; see AUTH_SECURITY_FIXES.md.)
 router.use(authenticateToken);
 
+// Calibration writes parameters onto an Evidence Model, which
+// rolePermissions.js declares admin-only editing -- same gate as
+// evidenceModels.js's recalibrate/decision-rule/activate-parameter-set.
+const canAuthor = authorizeRole(["admin"]);
+
 // ------------------------------
 // POST /api/calibrate/:evidenceModelId
 // ------------------------------
 // body: { responses: [ { studentId, answers: { q1: 1, q2: 0 } }, ... ] }
-router.post("/:evidenceModelId", async (req, res) => {
+router.post("/:evidenceModelId", canAuthor, async (req, res) => {
   const { evidenceModelId } = req.params;
   const { responses } = req.body;
 

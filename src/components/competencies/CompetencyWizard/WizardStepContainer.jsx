@@ -32,6 +32,7 @@ export default function WizardStepContainer({
     onSaveDraft,
     onSaveAndReview,
     onConfirm,
+    onReturnToDraft,
     children,
 }) {
     const [saving, setSaving] = useState(false);
@@ -98,6 +99,22 @@ export default function WizardStepContainer({
                 if (ok === false) return;
             }
             await onConfirm();
+        } finally {
+            setSaving(false);
+        }
+    }
+
+    /* =====================================================
+       🔹 RETURN TO DRAFT -- reviewer rejection. The lifecycle matrix has
+       always declared reviewed -> draft; this is its first control.
+    ===================================================== */
+
+    async function handleReturnToDraft() {
+        if (!onReturnToDraft || !isReviewMode) return;
+
+        try {
+            setSaving(true);
+            await onReturnToDraft();
         } finally {
             setSaving(false);
         }
@@ -208,6 +225,17 @@ export default function WizardStepContainer({
                                 )}
                             >
                                 {saving ? "Saving…" : "Save for Review"}
+                            </button>
+                        )}
+
+                        {/* Return to draft -- reviewer rejection, review mode only */}
+                        {isLast && isReviewMode && onReturnToDraft && (
+                            <button
+                                onClick={handleReturnToDraft}
+                                disabled={saving}
+                                className="inline-flex items-center gap-1.5 rounded-md border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-700 shadow-sm transition hover:bg-amber-50 disabled:cursor-not-allowed disabled:text-slate-400"
+                            >
+                                Return to draft
                             </button>
                         )}
 

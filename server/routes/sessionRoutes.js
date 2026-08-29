@@ -1,8 +1,21 @@
 import express from "express";
-import { authenticateToken } from "../utils/authMiddleware.js";
+import { authenticateToken, authorizeRole } from "../utils/authMiddleware.js";
 import { loadDB, saveDB, finishSession } from "../../src/utils/db-server.js";
 import { validateEntity } from "../../src/utils/schema.js";
+import { SESSION_STATUS } from "../../src/utils/sessionStatus.js";
+import { identifyEvidence } from "../delivery/evidenceIdentification.js";
+import { recordItemUsage } from "../utils/itemExposure.js";
 import { log2 } from "mathjs"; // if not available, define inline
+
+// Day 28 (Week 6): a session scores through an authored Evidence Model,
+// via server/delivery/evidenceIdentification.js, when the client opts in
+// by sending `itemId` instead of `questionId` on /submit. The legacy
+// db.questions path below this flag is completely UNCHANGED -- this is a
+// rollback lever, not a migration switch: SessionPlayer.jsx does not send
+// `itemId` yet (a separate, later task), so this defaults to true with
+// zero effect on real traffic today, and can be forced off in production
+// if the new path misbehaves, for one release, per the plan.
+const ITEM_DELIVERY_ENABLED = process.env.ITEM_DELIVERY_ENABLED !== "false";
 
 function entropy(p) {
   if (p <= 0 || p >= 1) return 0;
@@ -15,6 +28,15 @@ const router = express.Router();
 // (Previously this file had no auth check at all — added as part of the
 // Phase 1 security hardening pass; see AUTH_SECURITY_FIXES.md.)
 router.use(authenticateToken);
+
+// Most routes below are deliberately left open to any authenticated
+// role: creating, submitting, pausing and finishing a session is a
+// student's own self-service flow, not a privileged action, and
+// rolePermissions.js has no per-role session ownership model to gate
+// against yet (that's a real gap, but a scope-based one, not a role-list
+// one -- see the RBAC sweep notes). DELETE is the one exception: it was
+// already commented "For admin use only" but never enforced.
+const adminOnly = authorizeRole(["admin"]);
 
 const R_BACKEND = process.env.R_BACKEND_URL || "http://localhost:4000";
 
@@ -78,7 +100,7 @@ router.post("/", (req, res) => {
     nextTaskPolicy: policyConfig,
 
     // Lifecycle
-    status: "in-progress",
+    status: SESSION_STATUS.IN_PROGRESS,
     isCompleted: false,
     startedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -139,10 +161,10 @@ router.get("/:id", (req, res) => {
 // ------------------------------
 // POST /api/sessions/:id/submit
 // ------------------------------
-// body: { taskId, questionId?, rawAnswer, observationId?, scoredValue?, evidenceId?, rubricLevel? }
+// body: { taskId, questionId?, itemId?, rawAnswer, observationId?, scoredValue?, evidenceId?, rubricLevel? }
 router.post("/:id/submit", async (req, res) => {
   const { id } = req.params;
-  const { taskId, questionId, rawAnswer, observationId, scoredValue, evidenceId, rubricLevel } = req.body;
+  const { taskId, questionId, itemId, rawAnswer, observationId, scoredValue, evidenceId, rubricLevel } = req.body;
 
   const db = loadDB();
   const session = db.sessions.find(s => s.id === id && !s.isCompleted);
@@ -152,8 +174,172 @@ router.post("/:id/submit", async (req, res) => {
     return res.status(400).json({ error: `Task ${taskId} not part of this session` });
   }
 
-  // 🔹 Validation: observationId & evidenceId
   const task = db.tasks.find(t => t.id === taskId);
+
+  // 🔹 Day 28: item-based delivery, scoring through an authored Evidence
+  // Model via identifyEvidence() -- an Observable Variable value, not a
+  // score. Opt in per-request with `itemId` instead of `questionId`;
+  // everything below this block (the legacy db.questions path) is
+  // untouched and still runs exactly as before for a `questionId` request.
+  // Deliberately narrow: only /submit is wired today (the exit check is
+  // about scoring). /next-task's item-based selection is a separate,
+  // larger Activity Selection undertaking, not attempted here.
+  if (ITEM_DELIVERY_ENABLED && itemId) {
+    const item = db.items?.find(it => it.id === itemId);
+    if (!item) {
+      return res.status(400).json({ error: `Invalid itemId: ${itemId}` });
+    }
+
+    // Day 30 (adversarial review finding): the legacy path below validates
+    // that a submitted observation/evidence belongs to the task's own
+    // Task Model; this block had dropped that check entirely -- any item
+    // could be submitted against any task in the session, attributing its
+    // evidence to the wrong Task Model instance with no error at all.
+    if (!task) {
+      return res.status(400).json({ error: `Task ${taskId} has no task instance record.` });
+    }
+    if (item.taskModelId !== task.taskModelId) {
+      return res.status(400).json({
+        error: `Item '${itemId}' belongs to Task Model '${item.taskModelId}', not this task's '${task.taskModelId}'.`,
+      });
+    }
+
+    // Day 30 (adversarial review finding): an item already suspended
+    // (auto-retired for exceeding its exposure ceiling) or archived kept
+    // being delivered and scored through this path with no check at all --
+    // defeating the entire point of the ceiling recordItemUsage() enforces.
+    // A draft/reviewed/confirmed item is still deliberately deliverable
+    // here (Day 29's own preview/test-delivery design: it scores correctly,
+    // it just accrues no exposure) -- only a status that means "this item
+    // has been deliberately pulled from service" is refused.
+    if (["suspended", "archived"].includes(item.status)) {
+      return res.status(409).json({ error: `Item '${itemId}' is '${item.status}' and cannot be delivered.` });
+    }
+
+    // Day 30 (adversarial review finding): resubmitting the same taskId
+    // (a client retry, a double-click) used to silently duplicate the
+    // response, double-count exposure, and over-advance currentTaskIndex
+    // past a task that was never actually reached -- a session-ending bug
+    // for the `fixed` strategy, which is purely index-driven. Refused
+    // outright rather than silently accepted twice.
+    if (session.responses.some(r => r.taskId === taskId)) {
+      return res.status(409).json({ error: `Task ${taskId} already has a recorded response for this session.` });
+    }
+
+    // src/utils/schema.js's `collection === "sessions"` validation (a
+    // pre-existing contract this route never previously had a caller for)
+    // requires every response, once a session is live, to carry calibration
+    // provenance: which Evidence Model + version, and which calibrated
+    // parameterSet was active when the response was scored -- a pointer,
+    // never a cached parameter value, matching ADR 0003's "resolve live"
+    // boundary. An Evidence Model with no active calibrated parameterSet
+    // yet genuinely cannot deliver -- surfaced here as a clear, specific
+    // error rather than a confusing generic schema-validation failure.
+    const evidenceModelRecord = db.evidenceModels?.find(em => em.id === item.evidenceModelId);
+    const activeStatModel = evidenceModelRecord?.statisticalModels?.find(sm => sm.active);
+    const parameterSetId = activeStatModel?.activeParameterSetId;
+
+    if (!evidenceModelRecord) {
+      return res.status(400).json({ error: `Item '${itemId}' references unknown evidenceModelId '${item.evidenceModelId}'.` });
+    }
+    if (!parameterSetId) {
+      return res.status(400).json({
+        error: `Evidence model '${item.evidenceModelId}' has no active calibrated parameter set yet; item '${itemId}' cannot be scored through it.`,
+      });
+    }
+
+    // Day 30 (adversarial review finding): observationId is only required
+    // under strict/confirm-time validation (src/utils/schema.js), so a
+    // draft item with none would reach identifyEvidence() and hit its
+    // "requires an item with an observationId" throw -- a data-quality
+    // problem surfacing as an uncaught 500, not the clear 4xx every other
+    // malformed-reference case in this block gets.
+    if (!item.observationId) {
+      return res.status(400).json({ error: `Item '${itemId}' has no observationId; it cannot be scored.` });
+    }
+
+    // A structured work product is passed through as-is; a bare scalar
+    // (the common case -- an option id, a numeric value) is wrapped into
+    // the `{ selected: ... }` shape identifyEvidence's matching expects,
+    // matching the repo's own worked example (samples/sample-items.json).
+    // An ARRAY is also "not yet structured" for this purpose (Day 30
+    // finding): `typeof [] === "object"` made a multi-select rawAnswer like
+    // `["opt_a","opt_b"]` pass through unwrapped, so identifyEvidence tried
+    // to match pattern keys against numeric array indices and never
+    // matched anything real.
+    const workProduct =
+      rawAnswer && typeof rawAnswer === "object" && !Array.isArray(rawAnswer)
+        ? rawAnswer
+        : { selected: rawAnswer };
+
+    const evidence = identifyEvidence(workProduct, item, db);
+
+    const response = {
+      taskId,
+      itemId,
+      itemVersion: item.versionNumber,
+      taskModelVersion: item.taskModelVersion,
+      evidenceModelId: item.evidenceModelId,
+      evidenceModelVersion: evidenceModelRecord.versionNumber,
+      parameterSetId,
+      rawAnswer: rawAnswer ?? null,
+      observationId: evidence.observationId,
+      observableId: evidence.observableId,
+      activated: evidence.activated,
+      direction: evidence.direction,
+      strength: evidence.strength,
+      rationale: evidence.rationale,
+      timestamp: new Date().toISOString(),
+    };
+    if (evidence.warning) response.warning = evidence.warning;
+
+    session.responses.push(response);
+    session.currentTaskIndex = Math.min(session.currentTaskIndex + 1, session.taskIds.length);
+    session.updatedAt = new Date().toISOString();
+
+    // Day 30: defensive -- a task instance record predating this field, or
+    // authored by hand, should not crash delivery over a missing array.
+    if (!Array.isArray(task.generatedObservationIds)) {
+      task.generatedObservationIds = [];
+    }
+    if (evidence.observationId && !task.generatedObservationIds.includes(evidence.observationId)) {
+      task.generatedObservationIds.push(evidence.observationId);
+    }
+    task.updatedAt = new Date().toISOString();
+
+    // Day 29: this is the seam server/utils/itemExposure.js's own header
+    // comment names -- the moment an item is actually delivered to a
+    // student, not the record-usage HTTP route (author-gated, and until
+    // today had no caller at all). A no-op for a non-operational item
+    // (e.g. delivered in a preview/test context) is not an error here;
+    // only a truly operational item accrues real exposure. Day 30
+    // (adversarial review finding): the failure case used to be silently
+    // swallowed with no `else` branch at all, so an operational item that
+    // merely failed strict re-validation (e.g. missing a field required
+    // only once `status` reaches "operational") accrued no exposure with
+    // zero indication anywhere in the response -- undermining the very
+    // "real measurements, not permanent zeros" claim this day exists to
+    // make. Surfaced as a response field; never blocks the score itself,
+    // since a scoring failure and an exposure-bookkeeping failure are
+    // different severities and the student's response is valid either way.
+    const itemIndex = db.items.findIndex(it => it.id === itemId);
+    const usageResult = recordItemUsage(item, db, {});
+    if (usageResult.ok) {
+      db.items[itemIndex] = usageResult.item;
+    } else {
+      response.exposureNote = usageResult.error;
+    }
+
+    const { valid, errors } = validateEntity("sessions", session, db);
+    if (!valid) {
+      return res.status(400).json({ error: "Schema validation failed", details: errors });
+    }
+
+    saveDB(db);
+    return res.json(session);
+  }
+
+  // 🔹 Validation: observationId & evidenceId
   const taskModel = db.taskModels.find(tm => tm.id === task.taskModelId);
 
   let validObs = new Map();
@@ -414,11 +600,11 @@ router.post("/:id/resume", (req, res) => {
   const idx = db.sessions.findIndex((s) => s.id === id);
   if (idx === -1) return res.status(404).json({ error: "Session not found" });
 
-  if (db.sessions[idx].status !== "paused") {
+  if (db.sessions[idx].status !== SESSION_STATUS.PAUSED) {
     return res.status(400).json({ error: "Session is not paused" });
   }
 
-  db.sessions[idx].status = "in-progress";
+  db.sessions[idx].status = SESSION_STATUS.IN_PROGRESS;
   db.sessions[idx].updatedAt = new Date().toISOString();
   saveDB(db);
   res.json(db.sessions[idx]);
@@ -483,7 +669,7 @@ router.post("/:id/archive", (req, res) => {
 // DELETE /api/sessions/:id
 // ------------------------------
 // For admin use only
-router.delete("/:id", (req, res) => {
+router.delete("/:id", adminOnly, (req, res) => {
   const { id } = req.params;
   const db = loadDB();
   if (!db.sessions) db.sessions = [];

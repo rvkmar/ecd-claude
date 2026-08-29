@@ -9,7 +9,7 @@
       ]
     },
     "interaction": {
-      "type": "MCQ",
+      "type": "mcq",
       "responseComponents": [
         { "id": "opt_a", "label": "1/2" },
         { "id": "opt_b", "label": "3/8" },
@@ -18,7 +18,7 @@
       ]
     },
     "scoring": {
-      "method": "binary",
+      "method": "dichotomous",
       "maxScore": 1,
       "evidenceActivationMap": [
         {
@@ -35,7 +35,7 @@
       ]
     },
     "learningDomain": "cognitive",
-    "cognitiveDemand": { "bloomLevel": "Apply" },
+    "cognitiveDemand": { "bloomLevel": "apply" },
     "metadata": { "gradeBand": "6", "subject": "Mathematics", "tags": ["fractions", "equivalence"] },
     "psychometrics": { "statisticalModelType": "1PL" },
     "exposureControl": { "maxUsageBeforeRetire": 500, "maxReactivations": 2 }
@@ -50,7 +50,7 @@
       ]
     },
     "interaction": {
-      "type": "MCQ",
+      "type": "mcq",
       "responseComponents": [
         { "id": "opt_a", "label": "3/5" },
         { "id": "opt_b", "label": "5/8" },
@@ -58,7 +58,7 @@
       ]
     },
     "scoring": {
-      "method": "binary",
+      "method": "dichotomous",
       "maxScore": 1,
       "evidenceActivationMap": [
         {
@@ -75,7 +75,7 @@
       ]
     },
     "learningDomain": "cognitive",
-    "cognitiveDemand": { "bloomLevel": "Analyze" },
+    "cognitiveDemand": { "bloomLevel": "analyze" },
     "metadata": { "gradeBand": "6", "subject": "Mathematics", "tags": ["fractions", "comparison"] },
     "psychometrics": { "statisticalModelType": "1PL" },
     "exposureControl": { "maxUsageBeforeRetire": 500, "maxReactivations": 2 }

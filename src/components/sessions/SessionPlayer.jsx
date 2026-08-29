@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from "react";
 import Modal from "../ui/Modal";
 import toast from "react-hot-toast";
 import { usePolicies } from "../../api/queries/policies";
+import { SESSION_STATUS } from "../../utils/sessionStatus";
 
 import { useNavigate } from "react-router-dom";
 // SessionPlayer.jsx
@@ -266,7 +267,7 @@ export default function SessionPlayer({
 
   // ----- show resumed banner briefly when status flips to in-progress -----
   useEffect(() => {
-    if (session?.status === "in-progress") {
+    if (session?.status === SESSION_STATUS.IN_PROGRESS) {
       setShowResumedBanner(true);
       const timer = setTimeout(() => setShowResumedBanner(false), 4000);
       return () => clearTimeout(timer);
@@ -579,7 +580,7 @@ export default function SessionPlayer({
         <div className="text-xs text-gray-500 mt-1">Teacher can review submitted responses.</div>
       </div>
     );
-  } else if (countdownMs !== null && countdownMs > 0 && (session?.status === "in-progress" || session?.status === "in-progress" || session?.status === "in_progress")) {
+  } else if (countdownMs !== null && countdownMs > 0 && session?.status === SESSION_STATUS.IN_PROGRESS) {
     // show countdown when a deadline exists and is still in-progress
     function formatMs(ms) {
       const total = Math.max(0, Math.floor(ms / 1000));
@@ -793,8 +794,7 @@ export default function SessionPlayer({
                             // session is editable only when in-progress and not autoFinished/isCompleted
                             !(
                               session &&
-                              (session.status === "in-progress" ||
-                                session.status === "in_progress" ||
+                              (session.status === SESSION_STATUS.IN_PROGRESS ||
                                 session.status === undefined) &&
                               !session.autoFinished &&
                               !session.isCompleted
@@ -825,8 +825,7 @@ export default function SessionPlayer({
                           disabled={
                             !(
                               session &&
-                              (session.status === "in-progress" ||
-                                session.status === "in_progress" ||
+                              (session.status === SESSION_STATUS.IN_PROGRESS ||
                                 session.status === undefined) &&
                               !session.autoFinished &&
                               !session.isCompleted
@@ -851,8 +850,7 @@ export default function SessionPlayer({
                         disabled={
                           !(
                             session &&
-                            (session.status === "in-progress" ||
-                              session.status === "in_progress" ||
+                            (session.status === SESSION_STATUS.IN_PROGRESS ||
                               session.status === undefined) &&
                             !session.autoFinished &&
                             !session.isCompleted
@@ -876,8 +874,7 @@ export default function SessionPlayer({
                     disabled={
                       !(
                         session &&
-                        (session.status === "in-progress" ||
-                          session.status === "in_progress" ||
+                        (session.status === SESSION_STATUS.IN_PROGRESS ||
                           session.status === undefined) &&
                         !session.autoFinished &&
                         !session.isCompleted
@@ -898,8 +895,7 @@ export default function SessionPlayer({
                     disabled={
                       !(
                         session &&
-                        (session.status === "in-progress" ||
-                          session.status === "in_progress" ||
+                        (session.status === SESSION_STATUS.IN_PROGRESS ||
                           session.status === undefined) &&
                         !session.autoFinished &&
                         !session.isCompleted
@@ -919,8 +915,7 @@ export default function SessionPlayer({
                         submitting ||
                         !(
                           session &&
-                          (session.status === "in-progress" ||
-                            session.status === "in_progress" ||
+                          (session.status === SESSION_STATUS.IN_PROGRESS ||
                             session.status === undefined) &&
                           !session.autoFinished &&
                           !session.isCompleted
@@ -936,8 +931,7 @@ export default function SessionPlayer({
                       disabled={
                         !(
                           session &&
-                          (session.status === "in-progress" ||
-                            session.status === "in_progress" ||
+                          (session.status === SESSION_STATUS.IN_PROGRESS ||
                             session.status === undefined) &&
                           !session.autoFinished &&
                           !session.isCompleted
@@ -955,8 +949,7 @@ export default function SessionPlayer({
                           finishing ||
                           !(
                             session &&
-                            (session.status === "in-progress" ||
-                              session.status === "in_progress" ||
+                            (session.status === SESSION_STATUS.IN_PROGRESS ||
                               session.status === undefined) &&
                             !session.autoFinished &&
                             !session.isCompleted

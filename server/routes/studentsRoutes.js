@@ -1,6 +1,6 @@
 // server/routes/studentsRoutes.js
 import express from "express";
-import { authenticateToken } from "../utils/authMiddleware.js";
+import { authenticateToken, authorizeRole } from "../utils/authMiddleware.js";
 import { loadDB, saveDB } from "../../src/utils/db-server.js";
 import { validateEntity } from "../../src/utils/schema.js";
 
@@ -10,6 +10,13 @@ const router = express.Router();
 // (Previously this file had no auth check at all — added as part of the
 // Phase 1 security hardening pass; see AUTH_SECURITY_FIXES.md.)
 router.use(authenticateToken);
+
+// Every write route also needs a role gate: this file had none, and
+// src/config/rolePermissions.js had no "students" entity at all -- the
+// same absent-on-both-sides gap items/student once had. Admin-only is
+// the conservative default until a real district/teacher enrollment
+// workflow is designed; see the matching addition to rolePermissions.js.
+const canAuthor = authorizeRole(["admin"]);
 
 // GET /api/students
 router.get("/", (req, res) => {
@@ -26,7 +33,7 @@ router.get("/:id", (req, res) => {
 });
 
 // POST /api/students
-router.post("/", (req, res) => {
+router.post("/", canAuthor, (req, res) => {
   const { name, classId, districtId } = req.body;
   if (!name) return res.status(400).json({ error: "Name required" });
 
@@ -52,7 +59,7 @@ router.post("/", (req, res) => {
 
 
 // DELETE /api/students/:id
-router.delete("/:id", (req, res) => {
+router.delete("/:id", canAuthor, (req, res) => {
   const db = loadDB();
   const before = db.students.length;
   db.students = db.students.filter((s) => s.id !== req.params.id);

@@ -2,6 +2,7 @@
   // Utility to auto-finish sessions whose deadlines have passed.
   
   import { loadDB, saveDB } from "../../src/utils/db-server.js";
+  import { SESSION_STATUS } from "../../src/utils/sessionStatus.js";
   
   /**
    * Sweep through sessions and auto-finish those past their deadlines.
@@ -31,8 +32,8 @@
       // Only consider sessions in progress/reopened
       if (
         session.status &&
-        session.status !== "in_progress" &&
-        session.status !== "reopened"
+        session.status !== SESSION_STATUS.IN_PROGRESS &&
+        session.status !== SESSION_STATUS.REOPENED
       ) {
         continue;
       }
@@ -61,7 +62,7 @@
       if (!sessionDeadline) continue;
   
       if (sessionDeadline.getTime() <= now.getTime()) {
-        session.status = "submitted";
+        session.status = SESSION_STATUS.SUBMITTED;
         session.isCompleted = true;
         session.autoFinished = true;
         session.finishedAt = now.toISOString();

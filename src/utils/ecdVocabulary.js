@@ -218,6 +218,15 @@ export function deriveAllowedScoringMethods(model) {
     case "bayesian_network":
       return ["categorical_activation"];
 
+    // DINA/G-DINA classify each response pattern into a discrete attribute-
+    // mastery STATE, the same shape of output as a Bayesian network's
+    // latent node -- categorical_activation's responsePattern (a `state`
+    // key) fits directly, with no dichotomous/polytomous reading available
+    // since a single item's response isn't itself "correct" or "banded".
+    case "dina":
+    case "gdina":
+      return ["categorical_activation"];
+
     default:
       return [];
   }
@@ -254,18 +263,284 @@ export function responsePatternFields(method) {
 }
 
 /* True when the pattern has at least one of the fields its method
-   declares filled in. An empty `{}` is not a condition -- it matches
-   everything and nothing, and used to sail through validation because
-   `{}` is truthy. */
-export function responsePatternIsSpecified(method, pattern) {
-  const fields = responsePatternFields(method);
-  if (fields.length === 0) return true;
-  if (!pattern || typeof pattern !== "object") return false;
+   declares filled in, OR -- Day 27 -- at least one genuinely non-empty
+   key/value pair of any name at all.
 
-  return fields.some((f) => {
+   The second clause exists because two subsystems built against this same
+   field independently settled on different shapes: the Item Wizard's
+   EvidenceActivationEditor renders inputs FROM this table (so a
+   `dichotomous` rule it authors really does write `{equalsCorrect:
+   boolean}`), while server/delivery/evidenceIdentification.js -- the thing
+   that actually EVALUATES a responsePattern against a real work product --
+   matches raw response-value keys directly (`{selected: "opt_a"}`, the
+   shape the repo's own worked example, samples/sample-items.json, uses).
+   Before this fix, an item authored with that raw-response shape could
+   never be confirmed: this function returned false for it, since
+   `equalsCorrect` was absent. An abstract summary key like `equalsCorrect`
+   is itself never present on a real work product either, so treating it as
+   the ONLY valid shape would have made every dichotomous item
+   unconfirmable in practice once evidenceIdentification.js actually needed
+   to consume it. Both shapes are accepted here rather than picking one and
+   breaking the other's confirmed items retroactively.
+
+   An empty `{}` is not a condition either way -- it matches everything and
+   nothing, and used to sail through validation because `{}` is truthy. */
+export function responsePatternIsSpecified(method, pattern) {
+  if (!pattern || typeof pattern !== "object" || Array.isArray(pattern)) return false;
+
+  const fields = responsePatternFields(method);
+
+  if (fields.some((f) => {
     const v = pattern[f.key];
     if (f.type === "boolean") return typeof v === "boolean";
     if (f.type === "number") return typeof v === "number" && Number.isFinite(v);
     return String(v ?? "").trim().length > 0;
+  })) {
+    return true;
+  }
+
+  return Object.values(pattern).some((v) => {
+    if (Array.isArray(v)) return v.length > 0;
+    return v !== undefined && v !== null && String(v).trim().length > 0;
   });
+}
+
+/* =====================================================
+   6. Student Model Variables (competency-model level)
+   -----------------------------------------------------
+   A DINA/G-DINA student model IS a vector of binary SMVs, so `binary`
+   is a first-class type here alongside the traditional `continuous`
+   theta scale -- not a special case bolted on later. `ordinal` and
+   `categorical` are declared now (Day 16, Week 4 core schema) even
+   though only continuous and binary have a near-term consumer, so the
+   type enum doesn't need a breaking change when a polytomous SMV shows
+   up.
+
+   Each type only admits certain prior-distribution families -- a
+   binary attribute's prior is a probability of mastery (bernoulli/beta),
+   not a mean/sd -- so the family is validated against type here, the
+   same one-to-many compatibility shape as INTERACTION_COMPATIBILITY
+   above, not a flat shared enum.
+===================================================== */
+
+export const SM_VARIABLE_TYPES = [
+  {
+    value: "continuous",
+    label: "Continuous",
+    hint: "A latent trait on a continuous scale, e.g. IRT theta.",
+  },
+  {
+    value: "binary",
+    label: "Binary Attribute",
+    hint: "Mastery / non-mastery of a single attribute, as used by DINA/G-DINA.",
+  },
+  {
+    value: "ordinal",
+    label: "Ordinal",
+    hint: "An ordered set of proficiency levels.",
+  },
+  {
+    value: "categorical",
+    label: "Categorical",
+    hint: "An unordered set of latent classes.",
+  },
+];
+
+export const SM_VARIABLE_TYPE_VALUES = SM_VARIABLE_TYPES.map((t) => t.value);
+
+export function smVariableTypeLabel(value) {
+  return SM_VARIABLE_TYPES.find((t) => t.value === value)?.label || value || "—";
+}
+
+/* Which prior-distribution families are valid for each SMV type. */
+export const SM_VARIABLE_PRIOR_FAMILIES = {
+  continuous: ["normal", "uniform"],
+  binary: ["bernoulli", "beta"],
+  ordinal: ["dirichlet"],
+  categorical: ["dirichlet"],
+};
+
+export function priorFamiliesForSmVariableType(type) {
+  if (!type) return [];
+  return SM_VARIABLE_PRIOR_FAMILIES[type] || [];
+}
+
+export function isPriorFamilyCompatible(type, family) {
+  if (!type || !family) return false;
+  return priorFamiliesForSmVariableType(type).includes(family);
+}
+
+/* Numeric shape each prior family's `params` must satisfy. Mirrors
+   RESPONSE_PATTERN_FIELDS above: a descriptor table the validator and
+   any future editor both read, instead of two hand-kept copies. */
+export const PRIOR_DISTRIBUTION_PARAM_SPECS = {
+  normal: [
+    { key: "mean", label: "Mean" },
+    { key: "sd", label: "Standard deviation", positive: true },
+  ],
+  uniform: [
+    { key: "min", label: "Minimum" },
+    { key: "max", label: "Maximum" },
+  ],
+  bernoulli: [{ key: "p", label: "Probability of mastery", min: 0, max: 1 }],
+  beta: [
+    { key: "alpha", label: "Alpha", positive: true },
+    { key: "beta", label: "Beta", positive: true },
+  ],
+  dirichlet: [{ key: "alpha", label: "Concentration vector", isArray: true }],
+};
+
+/* True only when every declared param is present, numeric (or a numeric
+   array for dirichlet) and satisfies its own bound. A missing or
+   zero-length `params` object is not "unspecified yet" here the way an
+   empty response pattern is -- unlike interaction scoring, a prior
+   distribution is either fully specified or it cannot be sampled from,
+   so there is no lenient/draft reading of this rule. */
+export function priorDistributionParamsAreValid(family, params) {
+  const spec = PRIOR_DISTRIBUTION_PARAM_SPECS[family];
+  if (!spec) return false;
+  if (!params || typeof params !== "object") return false;
+
+  return spec.every((field) => {
+    const v = params[field.key];
+    if (field.isArray) {
+      return (
+        Array.isArray(v) &&
+        v.length > 0 &&
+        v.every((n) => typeof n === "number" && Number.isFinite(n) && n > 0)
+      );
+    }
+    if (typeof v !== "number" || !Number.isFinite(v)) return false;
+    if (field.positive && v <= 0) return false;
+    if (field.min !== undefined && v < field.min) return false;
+    if (field.max !== undefined && v > field.max) return false;
+    if (field.key === "min" && typeof params.max === "number" && v >= params.max) {
+      return false;
+    }
+    return true;
+  });
+}
+
+/* =====================================================
+   7. Declared psychological perspective (Competency Model level)
+   -----------------------------------------------------
+   Mislevy & Riconscente (2005) §2.1: the psychological perspective a
+   Competency Model is authored against "cannot be emphasized too
+   strongly", since a mismatch against the measurement model chosen
+   downstream produces a substantially less informative assessment (e.g.
+   a trait-perspective model scored with a diagnostic classification
+   model). Declared as one enum field on the Competency Model now, ahead
+   of the full Domain Analysis layer (~W23+), because it costs one field
+   and is the coherence check that catches that mismatch early.
+===================================================== */
+
+export const PSYCHOLOGICAL_PERSPECTIVES = [
+  {
+    value: "trait",
+    label: "Trait",
+    hint: "A stable, continuous latent trait -- the classical IRT/CTT view.",
+  },
+  {
+    value: "information_processing",
+    label: "Information Processing",
+    hint: "Cognitive processes and strategies, often decomposed into discrete attributes -- the usual fit for DINA/G-DINA.",
+  },
+  {
+    value: "sociocultural",
+    label: "Sociocultural",
+    hint: "Competence as situated in social/cultural practice rather than a purely individual trait.",
+  },
+  {
+    value: "developmental",
+    label: "Developmental",
+    hint: "Competence as a progression through ordered developmental stages.",
+  },
+];
+
+export const PSYCHOLOGICAL_PERSPECTIVE_VALUES = PSYCHOLOGICAL_PERSPECTIVES.map(
+  (p) => p.value
+);
+
+export function psychologicalPerspectiveLabel(value) {
+  return (
+    PSYCHOLOGICAL_PERSPECTIVES.find((p) => p.value === value)?.label ||
+    value ||
+    "—"
+  );
+}
+
+/* =====================================================
+   9. Cognitive-demand vocabulary: Bloom levels and reasoning types
+   -----------------------------------------------------
+   Day 22 (Week 5, vocabulary consolidation). Previously canonically
+   defined in src/components/taskModels/taskModelConstants.js and
+   re-exported from src/components/itemBank/itemConstants.js -- the same
+   "one definition, re-exported for existing call sites" arrangement this
+   file's header already documents for INTERACTION_TYPES/SCORING_METHODS,
+   and for the same reason: an item used to carry its own 4-value
+   REASONING_TYPES while the Task Model blueprint declared 7, three of
+   which no item could ever record -- a permanent false positive in
+   blueprint-coverage reporting. Moved here so schema.js (loaded directly
+   by node, not just bundled by vite) can validate against the same
+   values a `<select>` renders, instead of only checking `typeof ===
+   'string'` as it did before Day 22.
+===================================================== */
+
+export const BLOOM_LEVELS = [
+  { value: "remember", label: "Remember" },
+  { value: "understand", label: "Understand" },
+  { value: "apply", label: "Apply" },
+  { value: "analyze", label: "Analyze" },
+  { value: "evaluate", label: "Evaluate" },
+  { value: "create", label: "Create" },
+];
+
+export const BLOOM_LEVEL_VALUES = BLOOM_LEVELS.map((b) => b.value);
+
+export function bloomLevelLabel(value) {
+  return BLOOM_LEVELS.find((b) => b.value === value)?.label || value || "—";
+}
+
+export const REASONING_TYPES = [
+  { value: "recall", label: "Recall" },
+  { value: "procedural", label: "Procedural" },
+  { value: "algorithmic", label: "Algorithm Execution" },
+  { value: "deductive", label: "Deductive Inference" },
+  { value: "inductive", label: "Inductive Inference" },
+  { value: "quantitative", label: "Quantitative Reasoning" },
+  { value: "evaluative", label: "Evaluative Judgement" },
+];
+
+export const REASONING_TYPE_VALUES = REASONING_TYPES.map((r) => r.value);
+
+export function reasoningTypeLabel(value) {
+  return REASONING_TYPES.find((r) => r.value === value)?.label || value || "—";
+}
+
+/* =====================================================
+   8. Calibration file kinds (Day 19, Week 4 core schema)
+   -----------------------------------------------------
+   NOT YET unified with the pre-existing, purely client-side
+   `CALIBRATION_KINDS`/`KIND_MODEL_TYPES` in
+   src/components/evidences/calibration/engines/calibrationFile.js (which
+   also declares `irt-parameters` and a `bayesian-cpt` kind this list
+   doesn't cover, and is wired into the live recalibration-import UI).
+   Reconciling the two is deliberately left for later: that file backs a
+   currently-shipped import flow, and this week's collections are schema-
+   only, so touching it now risks the one thing this pass isn't supposed
+   to risk -- a working feature. This is the authoritative declaration
+   `validateEntity`'s provenance checks are written against; the UI's
+   list is a separate, pre-existing concern until they're consolidated.
+===================================================== */
+
+export const CALIBRATION_FILE_KINDS = [
+  { value: "ctt-statistics", label: "CTT Statistics", statisticalModelTypes: ["ctt"] },
+  { value: "irt-parameters", label: "IRT Parameters", statisticalModelTypes: ["irt", "rasch"] },
+  { value: "dina-parameters", label: "DINA/G-DINA Parameters", statisticalModelTypes: ["dina", "gdina"] },
+];
+
+export const CALIBRATION_FILE_KIND_VALUES = CALIBRATION_FILE_KINDS.map((k) => k.value);
+
+export function statisticalModelTypesForCalibrationKind(kind) {
+  return CALIBRATION_FILE_KINDS.find((k) => k.value === kind)?.statisticalModelTypes || [];
 }

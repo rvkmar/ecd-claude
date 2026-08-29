@@ -23,6 +23,7 @@ import { useState } from "react";
 import toast from "react-hot-toast";
 import { ChevronLeft, ChevronRight, Lock, X } from "lucide-react";
 import { useTaskModelWizard } from "./TaskModelWizardContext";
+import ErrorBoundary from "@/components/ui/ErrorBoundary";
 
 import Step1Identity from "./steps/Step1Identity";
 import Step2EvidenceBinding from "./steps/Step2EvidenceBinding";
@@ -214,6 +215,28 @@ export default function WizardStepContainer({ onCancel }) {
         }
     };
 
+    /* ------------------------------------------------------------
+     RETURN TO DRAFT -- reviewer rejection. Deliberately skips the
+     isStructurallyComplete gate above: that gate exists to keep a broken
+     model from being promoted forward, and would make it impossible to
+     reject exactly the incomplete/wrong models a reviewer most needs to
+     send back.
+    ------------------------------------------------------------ */
+    const returnToDraft = async () => {
+        if (saving) return;
+
+        try {
+            setSaving(true);
+            if (isDirty) {
+                const saved = await handleSaveDraft();
+                if (!saved) return;
+            }
+            await handlePromote("draft");
+        } finally {
+            setSaving(false);
+        }
+    };
+
     const handleCancelClick = () => {
         if (isEditable && isDirty) {
             setShowCancelModal(true);
@@ -307,6 +330,16 @@ export default function WizardStepContainer({ onCancel }) {
 
                         {isLastStep && isReviewMode && (
                             <button
+                                onClick={returnToDraft}
+                                disabled={saving}
+                                className="inline-flex items-center gap-1.5 rounded-md border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-700 shadow-sm transition hover:bg-amber-50 disabled:cursor-not-allowed disabled:text-slate-400"
+                            >
+                                Return to draft
+                            </button>
+                        )}
+
+                        {isLastStep && isReviewMode && (
+                            <button
                                 onClick={() => promote("confirmed")}
                                 disabled={saving || !isStructurallyComplete}
                                 title={
@@ -328,7 +361,9 @@ export default function WizardStepContainer({ onCancel }) {
                 sidebar and nav bar stay pinned via `sticky`. */}
             <div className="flex-1 px-8 py-8">
                 <div className="mx-auto max-w-5xl">
-                    {renderStep()}
+                    <ErrorBoundary resetKey={stepKey} label={stepKey}>
+                        {renderStep()}
+                    </ErrorBoundary>
 
                     {!isEditable && (
                         <div className="mt-8 flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3.5 text-sm text-emerald-800">

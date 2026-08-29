@@ -21,6 +21,14 @@ const router = express.Router();
 // (Previously this file had no auth check at all — added as part of the
 // Phase 1 security hardening pass; see AUTH_SECURITY_FIXES.md.)
 router.use(authenticateToken);
+
+// Every write route also needs a role gate: only force-deactivate had
+// one. src/config/rolePermissions.js declares taskModels editing as
+// admin+district (canEdit) and deletion as admin-only (canDelete) --
+// matching that split here rather than gating every write route alike.
+const canAuthor = authorizeRole(["admin", "district"]);
+const canDelete = authorizeRole(["admin"]);
+
 // Date.now() alone collides whenever two records are created inside the
 // same millisecond -- which POST /bulk does routinely, and two rapid
 // clones can too. A monotonic counter is appended so ids stay unique
@@ -247,7 +255,7 @@ function createTaskModelRecord(payload = {}, db, idSuffix = "", options = {}) {
 /* =====================================================
    🔹 CREATE (Draft Only)
 ===================================================== */
-router.post("/", (req, res) => {
+router.post("/", canAuthor, (req, res) => {
   const db = loadDB();
   const result = createTaskModelRecord(req.body || {}, db);
   if (!result.ok) {
@@ -268,7 +276,7 @@ router.post("/", (req, res) => {
    requirement is enforced at confirmation instead, where it protects
    something -- see `allowDraftParents` in src/utils/schema.js.
 ===================================================== */
-router.post("/bulk", (req, res) => {
+router.post("/bulk", canAuthor, (req, res) => {
   const rows = req.body;
   if (!Array.isArray(rows)) {
     return res.status(400).json({ error: "Request body must be a JSON array of task models." });
@@ -309,7 +317,7 @@ router.post("/bulk", (req, res) => {
    the body, so a stale or hostile client payload cannot smuggle a
    structural edit in alongside the transition.
 ===================================================== */
-router.put("/:id", (req, res) => {
+router.put("/:id", canAuthor, (req, res) => {
 
   const db = loadDB();
 
@@ -428,7 +436,7 @@ router.put("/:id", (req, res) => {
 /* =====================================================
    🔹 CONFIRM (Reviewed → Confirmed)
 ===================================================== */
-router.post("/:id/confirm", (req, res) => {
+router.post("/:id/confirm", canAuthor, (req, res) => {
 
   const db = loadDB();
   const model = db.taskModels?.find(m => m.id === req.params.id);
@@ -602,7 +610,7 @@ router.post("/:id/force-deactivate", authorizeRole(["admin", "district"]), (req,
 /* =====================================================
    🔹 CLONE (Versioned Structural Evolution)
 ===================================================== */
-router.post("/:id/clone", (req, res) => {
+router.post("/:id/clone", canAuthor, (req, res) => {
 
   const db = loadDB();
   const original = db.taskModels?.find(m => m.id === req.params.id);
@@ -663,7 +671,7 @@ router.get("/:id", (req, res) => {
 /* =====================================================
    🔹 DELETE (Draft Only)
 ===================================================== */
-router.delete("/:id", (req, res) => {
+router.delete("/:id", canDelete, (req, res) => {
 
   const db = loadDB();
   const model = db.taskModels?.find(m => m.id === req.params.id);

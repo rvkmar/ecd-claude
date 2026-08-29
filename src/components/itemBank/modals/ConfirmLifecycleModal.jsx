@@ -22,27 +22,19 @@ import {
 import { apiErrorMessage } from "@/api/apiClient";
 import { useAuth } from "@/auth/AuthProvider";
 
+// `reviewed` and `confirmed` are deliberately absent: ItemBuilder.jsx no
+// longer offers those two as one-click list actions (see its header
+// comment) -- they're only reachable via the Item Wizard's own Review
+// step, which gates them on completeness. Keeping dead copy for
+// statuses this modal is never opened with would misdescribe what this
+// call site still does.
 const COPY = {
-  reviewed: {
-    title: "Send this item to review?",
-    body: "The item stays editable. A reviewer confirms it, or sends it back to draft.",
-    ack: false,
-    tone: "bg-amber-600 hover:bg-amber-700",
-    verb: "Send to review",
-  },
   draft: {
     title: "Return this item to draft?",
     body: "The author regains editing rights and the review has to be repeated.",
     ack: false,
     tone: "bg-slate-900 hover:bg-slate-800",
     verb: "Return to draft",
-  },
-  confirmed: {
-    title: "Confirm and lock this item?",
-    body: "Structural bindings, stimulus, interaction and scoring freeze permanently. Revisions require a clone, which starts a new version. Any Task Model waiting on a confirmed item becomes activatable.",
-    ack: true,
-    tone: "bg-blue-600 hover:bg-blue-700",
-    verb: "Confirm & lock",
   },
   operational: {
     title: "Put this item into service?",

@@ -581,7 +581,7 @@ export default function StatisticalModelCard({
                         </div>
 
                         <div>
-                            Type: {(model?.type || "Not selected").toUpperCase()}
+                            Type: {model?.type?.toUpperCase() || "Not selected"}
                         </div>
 
                     </div>

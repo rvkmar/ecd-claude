@@ -1,7 +1,7 @@
 import express from "express";
 import { loadDB, saveDB } from "../../src/utils/db-server.js";
 import { validateEntity } from "../../src/utils/schema.js";  // ✅ schema with metadata-based a/b/c
-import { authenticateToken } from "../utils/authMiddleware.js";
+import { authenticateToken, authorizeRole } from "../utils/authMiddleware.js";
 
 const router = express.Router();
 
@@ -10,6 +10,16 @@ const router = express.Router();
 // This was missing here because the router was never mounted; add it now
 // that it's being wired back into the app.
 router.use(authenticateToken);
+
+// Every write route also needs a role gate: none had one.
+// src/config/rolePermissions.js declares "questions" editing as
+// admin-only (canEdit). The lifecycle route is a partial exception: its
+// own switch statement already lets a teacher move new -> review, so its
+// gate has to admit all three roles that statement checks and leave the
+// per-action split to it -- narrowing to canApprove's admin+district
+// would silently break the teacher's review path.
+const canAuthor = authorizeRole(["admin"]);
+const canApprove = authorizeRole(["admin", "district", "teacher"]);
 
 // ------------------------------
 // GET /api/questions
@@ -36,7 +46,7 @@ router.get("/:id", (req, res) => {
 // ------------------------------
 // POST /api/questions
 // ------------------------------
-router.post("/", (req, res) => {
+router.post("/", canAuthor, (req, res) => {
   const body = req.body;
   let {
     stem,
@@ -112,7 +122,7 @@ router.post("/", (req, res) => {
 // ------------------------------
 // PUT /api/questions/:id
 // ------------------------------
-router.put("/:id", (req, res) => {
+router.put("/:id", canAuthor, (req, res) => {
   const { id } = req.params;
   let updates = req.body;
 
@@ -169,7 +179,7 @@ router.put("/:id", (req, res) => {
 // PATCH /api/questions/:id/lifecycle
 // Update question lifecycle (promote, retire, reactivate)
 // ------------------------------
-router.patch("/:id/lifecycle", (req, res) => {
+router.patch("/:id/lifecycle", canApprove, (req, res) => {
   const { id } = req.params;
   const { action, userId, role } = req.body; // expect role from frontend for validation & action: review|activate|retire|reactivate
   const db = loadDB();
@@ -323,7 +333,7 @@ router.patch("/:id/lifecycle", (req, res) => {
 // ------------------------------
 import fetch from "node-fetch";
 
-router.post("/:id/sync-irt", async (req, res) => {
+router.post("/:id/sync-irt", canAuthor, async (req, res) => {
   const { id } = req.params;
   try {
     // 1️⃣ Get question (this router uses the same flat-file db-server store
@@ -375,7 +385,7 @@ router.post("/:id/sync-irt", async (req, res) => {
 // ------------------------------
 // DELETE /api/questions/:id
 // ------------------------------
-router.delete("/:id", (req, res) => {
+router.delete("/:id", canAuthor, (req, res) => {
   const { id } = req.params;
   const db = loadDB();
 

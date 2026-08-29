@@ -23,7 +23,20 @@ import {
   interactionCompatibilityMessage,
   interactionTypesForObservable,
   responsePatternIsSpecified,
+  SM_VARIABLE_TYPE_VALUES,
+  isPriorFamilyCompatible,
+  priorFamiliesForSmVariableType,
+  priorDistributionParamsAreValid,
+  PSYCHOLOGICAL_PERSPECTIVE_VALUES,
+  CALIBRATION_FILE_KIND_VALUES,
+  statisticalModelTypesForCalibrationKind,
+  BLOOM_LEVEL_VALUES,
+  REASONING_TYPE_VALUES,
 } from "./ecdVocabulary.js";
+
+// Canonical session status spellings -- see src/utils/sessionStatus.js for
+// why "in_progress" (underscore) is the one, not "in-progress".
+import { SESSION_STATUS } from "./sessionStatus.js";
 
 export const schema = {
 
@@ -158,6 +171,19 @@ export const schema = {
     locked: 'boolean',
     versionNumber: 'number',
     parentModelId: 'string',
+
+    // Student Model Variables -- see ecdVocabulary.js §6. Declared and
+    // validated as of Day 16 (Week 4 core schema); no wizard step authors
+    // this yet, so it is optional at every status, including confirmed --
+    // making it required would strand every model confirmed before the
+    // authoring UI exists. Each entry: { id, label, type, scale,
+    // priorDistribution: { family, params } }. A DINA/G-DINA student model
+    // is a vector of `binary`-type entries.
+    smVariables: 'array',
+
+    // See ecdVocabulary.js §7. Optional single enum, validated if present.
+    psychologicalPerspective: 'string',
+
     createdAt: 'date',
     updatedAt: 'date',
   },
@@ -230,7 +256,32 @@ export const schema = {
         calibratedBy: 'string',
         calibrationMethod: 'string',
         sampleSize: 'number',
-        notes: 'string'
+        notes: 'string',
+        // Provenance, Day 19 (Week 4 core schema): a calibration run whose
+        // package version and convergence cannot be stated is not
+        // defensible (build reference Part 4.3). `packageVersion` and
+        // `converged` are new; `sampleSize`/`calibratedAt` already existed
+        // above but were never actually mandatory -- see the validation
+        // block below, which makes all four jointly required and refuses
+        // to store a non-converged run, regardless of status or `strict`.
+        packageVersion: 'string',
+        converged: 'boolean',
+        // Optional: which of ecdVocabulary.js's CALIBRATION_FILE_KINDS this
+        // run's source file declared itself as, validated for consistency
+        // with the parent statisticalModel's `type` when present. Never
+        // required -- unlike the four provenance fields above, this is
+        // classification of the import, not evidence of run quality.
+        calibrationKind: 'string',
+        // ADR 0002 (Day 20): the rest of the calibration response contract,
+        // alongside the four mandatory provenance fields above. Both
+        // optional -- unlike provenance (an unconditional "can this run be
+        // trusted at all" question), these answer "how good was the fit",
+        // which not every calibration method produces and which genuinely
+        // varies in shape by model family (IRT vs CTT vs DINA/G-DINA fit
+        // indices share no common vocabulary). `fitStatistics` is
+        // deliberately left loosely typed for that reason -- see the ADR.
+        standardErrors: 'object',
+        fitStatistics: 'object',
       }],
       activeParameterSetId: 'string',
     }],
@@ -451,6 +502,128 @@ export const schema = {
     createdAt: 'date',
     updatedAt: 'date',
   },
+
+  // ------------------------------------------------------------------
+  // assemblyModels — Day 17 (Week 4 core schema). Declared and validated
+  // only; not mounted, no UI, no lifecycle wiring yet (that's Day 21's
+  // "matrix entries + validateXLifecycle() for each new core collection").
+  //
+  // `{targetsBySMV: [{smvId, requiredSEM | requiredClassificationAccuracy}],
+  // stoppingRules, selectionAlgorithm}` per the build reference: an Assembly
+  // Model states, per Student Model Variable on a Competency Model, how
+  // precisely it must be estimated before a session can stop -- a standard
+  // error target for a continuous SMV, a classification-accuracy target
+  // for a binary/ordinal/categorical one (see ecdVocabulary.js SM_VARIABLE_
+  // TYPES). `selectionAlgorithm` is a POINTER to an existing `policies`
+  // record (fixed/IRT/BayesianNetwork/MarkovChain), not a duplicated copy
+  // of its `type` -- the "one pointer, validated on both sides" invariant.
+  //
+  // Declared in the plain-shape style, not the JSON-schema style `policies`
+  // uses above, for the same reason `curricularPolicies` is: the JSON-schema
+  // branch in validateEntity returns early and would never reach the deep
+  // `collection === "assemblyModels"` referential-integrity checks below.
+  // ------------------------------------------------------------------
+  assemblyModels: {
+    id: 'string',
+    name: 'string',
+    description: 'string',
+    competencyModelId: 'string',
+    competencyModelVersion: 'number',
+    targetsBySMV: 'array',
+    stoppingRules: 'object',
+    selectionAlgorithm: 'object',
+    status: 'string',
+    // Day 21 (Week 5): lifecycle wiring. `locked`/`versionNumber`/
+    // `parentModelId` bring this entity's shape in line with every other
+    // lifecycle-governed collection (competencyModels, taskModels, items),
+    // since validateAssemblyModelLifecycle (server/utils/lifecycleValidation.js)
+    // and the confirmed-requires-locked check below both need them. Full
+    // version-migration governance (the multi-step chain competencyModels
+    // has) is NOT built here -- out of scope for "legal transitions + a
+    // promotion validator."
+    locked: 'boolean',
+    versionNumber: 'number',
+    parentModelId: 'string',
+    createdAt: 'date',
+    updatedAt: 'date',
+  },
+
+  // ------------------------------------------------------------------
+  // qMatrixModels — Day 18 (Week 4 core schema). Declared and validated
+  // only; not mounted, no UI, no lifecycle wiring yet. The Q-matrix editor
+  // itself and the DINA/G-DINA config panel on the Evidence Model are both
+  // explicitly W10 deliverables in the build reference -- this collection
+  // exists here only so `dina`/`gdina` statisticalModels entries (added to
+  // `evidenceModels` below) have something real to point at and validate
+  // against.
+  //
+  // An attributes x items matrix: `attributeIds` are the columns, and MUST
+  // each be a `binary`-type entry in the bound competency model's
+  // `smVariables[]` (see ecdVocabulary.js SM_VARIABLE_TYPES) -- a Q-matrix
+  // over a continuous SMV is a category error, not a stricter variant.
+  // `entries[]` are the sparse cells: which items require which attributes.
+  //
+  // Named `qMatrixModels`, not `qMatrices`, so it survives dbAdapter.js's
+  // naive trailing-"s" singularizer (`qMatrices` -> `qMatrice`, wrong;
+  // `qMatrixModels` -> `qMatrixModel`, correct) -- see CLAUDE.md's note on
+  // keeping collection names simple plurals.
+  //
+  // Declared in the plain-shape style for the same reason `assemblyModels`
+  // and `curricularPolicies` are: the JSON-schema branch in validateEntity
+  // returns early and would never reach the deep
+  // `collection === "qMatrixModels"` referential-integrity checks below.
+  // ------------------------------------------------------------------
+  qMatrixModels: {
+    id: 'string',
+    name: 'string',
+    description: 'string',
+    competencyModelId: 'string',
+    competencyModelVersion: 'number',
+    attributeIds: 'array',
+    entries: 'array',
+    status: 'string',
+    // Day 21 (Week 5): lifecycle wiring -- see the identical comment on
+    // assemblyModels above.
+    locked: 'boolean',
+    versionNumber: 'number',
+    parentModelId: 'string',
+    createdAt: 'date',
+    updatedAt: 'date',
+  },
+
+  // ------------------------------------------------------------------
+  // compositeLibrary — Day 19 (Week 4 core schema). Schema declaration
+  // only: the actual builder (`compositeLibrary/builder.js`, walking
+  // Task Model -> items -> evidence models to COMPILE a package) is Day
+  // 24. This just gives that future builder something real to write into
+  // and validate against, per-item referential integrity today.
+  //
+  // Deliberately has NO `status`/lifecycle. Per the build reference, a
+  // composite library entry is "a compiled versioned package built at
+  // Task Model activation" -- a build ARTIFACT keyed by
+  // (taskModelId, taskModelVersion), not an authored entity a human
+  // drafts/reviews/revises. `parameterSets[]` above is the closer
+  // precedent in this codebase: append-only, stamped at creation, never
+  // transitioned through a status enum. `active` marks which package is
+  // currently served for a given taskModelId; at most one may be active
+  // (enforced below), the same "exactly one active X" shape as
+  // statisticalModels' activeCount check.
+  //
+  // Declared in the plain-shape style for the same reason `assemblyModels`
+  // and `qMatrixModels` are: the JSON-schema branch in validateEntity
+  // returns early and would never reach the deep
+  // `collection === "compositeLibrary"` referential-integrity checks below.
+  // ------------------------------------------------------------------
+  compositeLibrary: {
+    id: 'string',
+    taskModelId: 'string',
+    taskModelVersion: 'number',
+    compiledAt: 'date',
+    active: 'boolean',
+    items: 'array',
+    createdAt: 'date',
+    updatedAt: 'date',
+  },
 };
 
 // ------------------------------
@@ -514,39 +687,25 @@ export const INSTANTIABLE_TASK_MODEL_STATUSES = [
 /* ------------------------------------------------------------
    taskStructure.resourceConstraints.toolsAllowed
 
-   Two components disagreed about this field's type and nothing declared
-   one: `schema.js` says `resourceConstraints: 'object'` and stops there.
-   The Task Model editor (Step4TaskStructure) wrote a comma-separated
-   FREE-TEXT STRING; the Item Wizard read it as a `string[]` and called
-   `.join()` on it. The guard in front of that call was `?.length`, which
-   is truthy for a non-empty string -- so a Task Model with no tools ("")
-   or with the field absent both passed harmlessly, and one with
-   "Scratch pad" threw
+   Two components used to disagree about this field's type: the Task
+   Model editor (Step4TaskStructure) wrote a comma-separated FREE-TEXT
+   STRING while the Item Wizard read it as a `string[]` and called
+   `.join()` on it, unmounting the whole admin console to a blank page
+   for any Task Model that actually named a tool.
 
-       TypeError: ...toolsAllowed.join is not a function
-
-   out of a render, unmounting the whole admin console to a blank page.
-   It looked intermittent because it depended on which Task Model was
-   bound.
-
-   The list is the real type -- consumers want to enumerate the tools --
-   so the Task Model editor now writes an array. This reader stays
-   tolerant because records already on disk hold strings, and a
-   type-normalising migration is not something to run from inside a UI
-   fix. Every consumer must read through here rather than touching the
-   field directly.
+   The array is the real type. The Task Model editor has written arrays
+   since that fix, and server/migrations/migrations/002-normalize-tools-allowed.js
+   rewrote every remaining comma-separated string on disk, so this reader
+   no longer needs to tolerate both shapes -- every consumer still reads
+   through here rather than touching the field directly, in case a future
+   record ever fails to normalize.
 ------------------------------------------------------------ */
 export function toolsAllowedList(resourceConstraints) {
   const raw = resourceConstraints?.toolsAllowed;
 
-  if (Array.isArray(raw)) {
-    return raw.map((t) => String(t ?? "").trim()).filter(Boolean);
-  }
+  if (!Array.isArray(raw)) return [];
 
-  return String(raw ?? "")
-    .split(",")
-    .map((t) => t.trim())
-    .filter(Boolean);
+  return raw.map((t) => String(t ?? "").trim()).filter(Boolean);
 }
 
 export function isInstantiableTaskModel(tm) {
@@ -868,8 +1027,89 @@ export function validateEntity(collection, obj, db = null, options = {}) {
         }
       }
 
+      /* DINA / G-DINA — Day 18. A diagnostic classification model is
+         defined over a Q-matrix, not authored freestanding, so its
+         structureConfig carries a POINTER (`qMatrixId`) rather than a
+         duplicated copy of the attribute list. Every attribute the bound
+         Q-matrix declares must be a binary SMV -- this is the check the
+         Day 18 exit criterion names ("a G-DINA model ... refuses a
+         continuous SMV"), enforced here even though qMatrixModels' own
+         validation already enforces it at authoring time, because this
+         evidence model may be validated against a `db` snapshot where
+         that invariant was violated by some other path. */
+      if (sm.type === "dina" || sm.type === "gdina") {
+        const qMatrixId = sm.structureConfig?.qMatrixId;
+
+        if (strict && !qMatrixId) {
+          errors.push(`Statistical model ${sm.id} (${sm.type}) requires structureConfig.qMatrixId.`);
+        }
+
+        if (qMatrixId && db) {
+          const qMatrix = db.qMatrixModels?.find(q => q.id === qMatrixId);
+          if (!qMatrix) {
+            errors.push(`Statistical model ${sm.id} (${sm.type}) references unknown qMatrixId '${qMatrixId}'.`);
+          } else {
+            const boundCompetencyModel = db.competencyModels?.find(m => m.id === qMatrix.competencyModelId);
+            const nonBinaryAttr = (qMatrix.attributeIds || [])
+              .map(attrId => boundCompetencyModel?.smVariables?.find(smv => smv.id === attrId))
+              .find(smv => smv && smv.type !== "binary");
+
+            if (nonBinaryAttr) {
+              errors.push(
+                `Statistical model ${sm.id} (${sm.type}) is bound to Q-matrix '${qMatrixId}', which references non-binary SMV '${nonBinaryAttr.id}' (type '${nonBinaryAttr.type}'). DINA/G-DINA models require every Q-matrix attribute to be a binary Student Model Variable.`
+              );
+            }
+          }
+        }
+      }
+
       if (obj.status === "draft" && sm.parameterSets?.length > 0) {
         errors.push(`Draft evidence model cannot contain parameterSets.`);
+      }
+
+      /* PROVENANCE — Day 19. Mandatory on every parameterSet, at every
+         status (never gated by `strict`): a calibration run whose package
+         version and convergence cannot be stated is not defensible, and a
+         run that did not converge must be refused outright rather than
+         stored as though it were usable. */
+      for (const ps of sm.parameterSets || []) {
+        const psTag = ps.parameterSetId || "(missing id)";
+
+        if (!ps.packageVersion) {
+          errors.push(`Parameter set ${psTag} on model ${sm.id} requires packageVersion.`);
+        }
+        if (typeof ps.sampleSize !== "number" || ps.sampleSize <= 0) {
+          errors.push(`Parameter set ${psTag} on model ${sm.id} requires a positive sampleSize.`);
+        }
+        if (!ps.calibratedAt) {
+          errors.push(`Parameter set ${psTag} on model ${sm.id} requires calibratedAt.`);
+        }
+        if (typeof ps.converged !== "boolean") {
+          errors.push(`Parameter set ${psTag} on model ${sm.id} must declare converged.`);
+        } else if (!ps.converged) {
+          errors.push(`Parameter set ${psTag} on model ${sm.id} did not converge and cannot be stored as a parameter set.`);
+        }
+
+        if (ps.calibrationKind !== undefined && ps.calibrationKind !== null) {
+          if (!CALIBRATION_FILE_KIND_VALUES.includes(ps.calibrationKind)) {
+            errors.push(`Parameter set ${psTag} on model ${sm.id} has invalid calibrationKind '${ps.calibrationKind}'. Must be one of: ${CALIBRATION_FILE_KIND_VALUES.join(", ")}.`);
+          } else if (!statisticalModelTypesForCalibrationKind(ps.calibrationKind).includes(sm.type)) {
+            errors.push(`Parameter set ${psTag} on model ${sm.id} declares calibrationKind '${ps.calibrationKind}', which does not apply to statistical model type '${sm.type}'.`);
+          }
+        }
+
+        // ADR 0002: optional, but if present must actually be the object
+        // shape the contract describes -- not required of every run.
+        if (ps.standardErrors !== undefined && ps.standardErrors !== null) {
+          if (typeof ps.standardErrors !== "object" || Array.isArray(ps.standardErrors)) {
+            errors.push(`Parameter set ${psTag} on model ${sm.id} has invalid standardErrors: should be object.`);
+          }
+        }
+        if (ps.fitStatistics !== undefined && ps.fitStatistics !== null) {
+          if (typeof ps.fitStatistics !== "object" || Array.isArray(ps.fitStatistics)) {
+            errors.push(`Parameter set ${psTag} on model ${sm.id} has invalid fitStatistics: should be object.`);
+          }
+        }
       }
 
       if (obj.status === "confirmed") {
@@ -1066,16 +1306,17 @@ export function validateEntity(collection, obj, db = null, options = {}) {
           }
         }
 
-        // Bayesian Network produces posterior probabilities
-        if (activeModel.type === "bayesian_network") {
+        // Bayesian Network, DINA and G-DINA all produce posterior/mastery
+        // PROBABILITIES over discrete states, not a raw or latent score.
+        if (["bayesian_network", "dina", "gdina"].includes(activeModel.type)) {
           if (dr.type === "mastery" && dr.threshold > 1) {
             errors.push(
-              "Bayesian network mastery decision must use posterior probability between 0 and 1."
+              `${activeModel.type === "bayesian_network" ? "Bayesian network" : "DINA/G-DINA"} mastery decision must use posterior probability between 0 and 1.`
             );
           }
           if (dr.type === "score_band") {
             errors.push(
-              "Bayesian network does not support score_band without explicit discretization layer."
+              `${activeModel.type === "bayesian_network" ? "Bayesian network" : "DINA/G-DINA"} does not support score_band without explicit discretization layer.`
             );
           }
         }
@@ -1124,8 +1365,16 @@ export function validateEntity(collection, obj, db = null, options = {}) {
           // categorical deliberately excludes it. Mirrors
           // modelGuidanceLibrary.js's allowedVariableTypes -- keep the two
           // in step, or Step 6 will offer a model confirmation rejects.
+          //
+          // `dina`/`gdina` are declared allowed here (Day 18) WITHOUT a
+          // matching modelGuidanceLibrary.js entry -- deliberately, since
+          // that library drives Step 6's picker and the DINA/G-DINA config
+          // panel is an explicit W10 deliverable, not this week's. That
+          // asymmetry is safe in only this one direction: schema.js
+          // permitting a model Step 6 doesn't yet offer can never produce
+          // the "offered then rejected" bug the comment above warns about.
           if (vType === "binary") {
-            const allowed = ["ctt", "rasch", "irt", "bayesian_network", "sum"];
+            const allowed = ["ctt", "rasch", "irt", "bayesian_network", "sum", "dina", "gdina"];
             if (!allowed.includes(sm.type)) errors.push(`Statistical model '${sm.type}' incompatible with binary competency.`);
             if (sm.type === "irt" && sm.subtype && sm.subtype !== "1pl") {
               errors.push("Binary competency allows only 1PL (Rasch) IRT.");
@@ -2074,7 +2323,7 @@ export function validateEntity(collection, obj, db = null, options = {}) {
 
           const sessionsUsingEvidence = db.sessions?.filter(
             s =>
-              ["in_progress"].includes(s.status) &&
+              [SESSION_STATUS.IN_PROGRESS].includes(s.status) &&
               (s.responses || []).some(
                 r => r.evidenceModelId === obj.id
               )
@@ -2118,7 +2367,7 @@ export function validateEntity(collection, obj, db = null, options = {}) {
 
           const adaptiveSessions = db.sessions?.filter(
             s =>
-              ["in_progress"].includes(s.status) &&
+              [SESSION_STATUS.IN_PROGRESS].includes(s.status) &&
               ["IRT", "BayesianNetwork"].includes(s.selectionStrategy) &&
               (s.responses || []).some(
                 r => r.evidenceModelId === obj.id
@@ -2400,6 +2649,25 @@ export function validateEntity(collection, obj, db = null, options = {}) {
       errors.push("scoring.maxScore must be a positive number.");
     }
 
+    // Day 22 (vocabulary consolidation): cognitiveDemand.bloomLevel/
+    // reasoningType were declared as bare 'string' with no enum check at
+    // all before this -- any string passed. BLOOM_LEVELS/REASONING_TYPES
+    // moved to ecdVocabulary.js specifically so this validator and the
+    // wizard <select> it constrains read the same values.
+    if (obj.cognitiveDemand?.bloomLevel &&
+        !BLOOM_LEVEL_VALUES.includes(obj.cognitiveDemand.bloomLevel)) {
+      errors.push(
+        `Unknown cognitiveDemand.bloomLevel '${obj.cognitiveDemand.bloomLevel}'. Known levels: ${BLOOM_LEVEL_VALUES.join(", ")}.`
+      );
+    }
+
+    if (obj.cognitiveDemand?.reasoningType &&
+        !REASONING_TYPE_VALUES.includes(obj.cognitiveDemand.reasoningType)) {
+      errors.push(
+        `Unknown cognitiveDemand.reasoningType '${obj.cognitiveDemand.reasoningType}'. Known types: ${REASONING_TYPE_VALUES.join(", ")}.`
+      );
+    }
+
     for (const map of obj.scoring?.evidenceActivationMap || []) {
 
       if (map.activatesObservable !== undefined &&
@@ -2467,6 +2735,28 @@ export function validateEntity(collection, obj, db = null, options = {}) {
               `Activation rule ${i + 1} has no response pattern. An empty pattern matches nothing.`
             );
           }
+        });
+
+        // Day 27: two rules with byte-identical responsePatterns are
+        // unambiguously an authoring mistake -- whichever is declared
+        // first silently shadows the other at delivery time (Evidence
+        // Identification matches the first entry whose pattern fits, see
+        // server/delivery/evidenceIdentification.js), and nothing warns
+        // the author their second rule can never fire. This catches only
+        // EXACT duplicates, not general semantic overlap (e.g. one pattern
+        // whose array-valued key is a superset of another's) -- detecting
+        // that in general needs the pattern's array/membership semantics,
+        // which is a fuzzier problem deliberately left for a future pass.
+        const seenPatterns = new Set();
+        obj.scoring.evidenceActivationMap.forEach((map, i) => {
+          if (!map.responsePattern || typeof map.responsePattern !== "object") return;
+          const key = JSON.stringify(map.responsePattern);
+          if (seenPatterns.has(key)) {
+            errors.push(
+              `Activation rule ${i + 1} has the exact same responsePattern as an earlier rule; the earlier rule always wins and this one can never fire.`
+            );
+          }
+          seenPatterns.add(key);
         });
 
         const maxRuleScore = obj.scoring.evidenceActivationMap.reduce(
@@ -3048,6 +3338,23 @@ export function validateEntity(collection, obj, db = null, options = {}) {
       ) {
         errors.push("blueprintConstraints.allowedScoringMethods must be an array.");
       }
+
+      // Day 22 (vocabulary consolidation): same enum-validity gap as the
+      // item-level cognitiveDemand check below -- bloomLevel/reasoningType
+      // were bare 'string' with no allow-list check until now.
+      if (bc.cognitiveDemand?.bloomLevel &&
+          !BLOOM_LEVEL_VALUES.includes(bc.cognitiveDemand.bloomLevel)) {
+        errors.push(
+          `Unknown blueprintConstraints.cognitiveDemand.bloomLevel '${bc.cognitiveDemand.bloomLevel}'. Known levels: ${BLOOM_LEVEL_VALUES.join(", ")}.`
+        );
+      }
+
+      if (bc.cognitiveDemand?.reasoningType &&
+          !REASONING_TYPE_VALUES.includes(bc.cognitiveDemand.reasoningType)) {
+        errors.push(
+          `Unknown blueprintConstraints.cognitiveDemand.reasoningType '${bc.cognitiveDemand.reasoningType}'. Known types: ${REASONING_TYPE_VALUES.join(", ")}.`
+        );
+      }
     }
 
     /* ---------------------------------------------------
@@ -3346,10 +3653,42 @@ export function validateEntity(collection, obj, db = null, options = {}) {
 
   if (collection === "sessions") {
 
-    if (db && ["in_progress", "submitted", "reviewed"].includes(obj.status)) {
+    if (db && [SESSION_STATUS.IN_PROGRESS, SESSION_STATUS.SUBMITTED, "reviewed"].includes(obj.status)) {
 
-      for (const r of obj.responses || []) {
+      // Day 30 (adversarial review finding): this loop used to re-check
+      // EVERY historical response against CURRENT db state on every single
+      // session write (a submit, a pause, a finish -- anything that calls
+      // validateEntity("sessions", ...)). Provenance is meant to answer
+      // "was this response consistent with the world at the moment it was
+      // scored" -- a historical fact, checked once, at append time.
+      // Re-validating it against a WORLD THAT HAS SINCE MOVED ON (an
+      // Evidence Model recalibrated, an item's version bumped) meant a
+      // single recalibration permanently 400'd every future submit on
+      // every session that had already scored against that Evidence Model
+      // -- including sessions using the completely unrelated legacy
+      // db.questions path, since this loop iterated the whole array with
+      // no distinction between item-based and legacy responses mixed into
+      // the same session. Only the most-recently-appended response is
+      // actually being asserted as valid by the write in progress; every
+      // earlier one was already checked when IT was appended and does not
+      // need re-litigating against a present that has moved past it.
+      const responses = obj.responses || [];
+      const mostRecent = responses.length ? [responses[responses.length - 1]] : [];
 
+      for (const r of mostRecent) {
+
+        // Day 28: this whole block -- evidenceModelId/parameterSetId/
+        // version provenance -- only ever meant anything for item-based
+        // responses (it reads `db.items`, `r.itemVersion`,
+        // `r.taskModelVersion` right above). It was written with no caller
+        // that ever produced an item-based response, and NO scoping
+        // condition of its own, so it ran unconditionally for every
+        // response including the pre-existing legacy db.questions shape --
+        // which never had an `evidenceModelId` field at all. That silently
+        // broke every /submit call once a session reached "in_progress",
+        // for every session, with zero test coverage to catch it. Now
+        // correctly scoped to `r.itemId` responses only, matching the
+        // version checks it already sits beside.
         if (r.itemId) {
 
           const item = db.items?.find(i => i.id === r.itemId);
@@ -3364,61 +3703,61 @@ export function validateEntity(collection, obj, db = null, options = {}) {
               errors.push("Session taskModelVersion mismatch.");
             }
           }
-        }
 
-        if (!r.evidenceModelId) {
-          errors.push("Session response missing evidenceModelId.");
-          continue;
-        }
+          if (!r.evidenceModelId) {
+            errors.push("Session response missing evidenceModelId.");
+            continue;
+          }
 
-        const evidence = db.evidenceModels?.find(
-          em => em.id === r.evidenceModelId
-        );
-
-        if (!evidence) {
-          errors.push(`Invalid evidenceModelId in session: ${r.evidenceModelId}`);
-          continue;
-        }
-
-        if (!r.parameterSetId) {
-          errors.push(
-            `Session response for evidence ${r.evidenceModelId} missing parameterSetId.`
-          );
-        } else {
-          const sm = evidence.statisticalModels?.find(
-            sm => sm.active
+          const evidence = db.evidenceModels?.find(
+            em => em.id === r.evidenceModelId
           );
 
-          if (!sm || sm.activeParameterSetId !== r.parameterSetId) {
+          if (!evidence) {
+            errors.push(`Invalid evidenceModelId in session: ${r.evidenceModelId}`);
+            continue;
+          }
+
+          if (!r.parameterSetId) {
             errors.push(
-              `Session response parameterSetId mismatch for evidence ${r.evidenceModelId}.`
+              `Session response for evidence ${r.evidenceModelId} missing parameterSetId.`
+            );
+          } else {
+            const sm = evidence.statisticalModels?.find(
+              sm => sm.active
+            );
+
+            if (!sm || sm.activeParameterSetId !== r.parameterSetId) {
+              errors.push(
+                `Session response parameterSetId mismatch for evidence ${r.evidenceModelId}.`
+              );
+            }
+          }
+
+          const competency = db.competencies?.find(
+            c => c.id === evidence.competencyId
+          );
+
+          if (competency) {
+            const model = db.competencyModels?.find(
+              m => m.id === competency.modelId
+            );
+
+            if (
+              model &&
+              evidence.competencyModelVersion !== model.versionNumber
+            ) {
+              errors.push(
+                `Session evidence ${r.evidenceModelId} is bound to outdated competency model version.`
+              );
+            }
+          }
+
+          if (r.evidenceModelVersion !== evidence.versionNumber) {
+            errors.push(
+              `Session evidenceModelVersion mismatch for evidence ${r.evidenceModelId}.`
             );
           }
-        }
-
-        const competency = db.competencies?.find(
-          c => c.id === evidence.competencyId
-        );
-
-        if (competency) {
-          const model = db.competencyModels?.find(
-            m => m.id === competency.modelId
-          );
-
-          if (
-            model &&
-            evidence.competencyModelVersion !== model.versionNumber
-          ) {
-            errors.push(
-              `Session evidence ${r.evidenceModelId} is bound to outdated competency model version.`
-            );
-          }
-        }
-
-        if (r.evidenceModelVersion !== evidence.versionNumber) {
-          errors.push(
-            `Session evidenceModelVersion mismatch for evidence ${r.evidenceModelId}.`
-          );
         }
       }
     }
@@ -3627,6 +3966,362 @@ export function validateEntity(collection, obj, db = null, options = {}) {
             "Historical competency model versions must remain locked (soft deprecation enforced)."
           );
         }
+      }
+    }
+
+    /* ---------------------------------------------------
+       PHASE 6 — STEP 6
+       STUDENT MODEL VARIABLES (SMVs)
+       Optional at every status (see the `smVariables` field comment
+       above) -- these checks validate the SHAPE of entries that ARE
+       present, they never require the array to be non-empty. This runs
+       unconditionally (not gated by `strict`) because, unlike wizard
+       step completeness, a malformed SMV that IS authored is wrong at
+       every status, not just at confirm time.
+    --------------------------------------------------- */
+
+    if (obj.psychologicalPerspective !== undefined && obj.psychologicalPerspective !== null) {
+      if (!PSYCHOLOGICAL_PERSPECTIVE_VALUES.includes(obj.psychologicalPerspective)) {
+        errors.push(
+          `Invalid psychologicalPerspective '${obj.psychologicalPerspective}'. Must be one of: ${PSYCHOLOGICAL_PERSPECTIVE_VALUES.join(", ")}.`
+        );
+      }
+    }
+
+    if (Array.isArray(obj.smVariables)) {
+      const seenIds = new Set();
+
+      obj.smVariables.forEach((smv, i) => {
+        const tag = `smVariables[${i}]${smv?.id ? ` (${smv.id})` : ""}`;
+
+        if (!smv || typeof smv !== "object") {
+          errors.push(`${tag} must be an object.`);
+          return;
+        }
+
+        if (!smv.id || !smv.label || !smv.type) {
+          errors.push(`${tag} is missing a required field: id, label and type are all required.`);
+        }
+
+        if (smv.id) {
+          if (seenIds.has(smv.id)) {
+            errors.push(`Duplicate smVariables id '${smv.id}'.`);
+          }
+          seenIds.add(smv.id);
+        }
+
+        if (smv.type && !SM_VARIABLE_TYPE_VALUES.includes(smv.type)) {
+          errors.push(
+            `${tag} has invalid type '${smv.type}'. Must be one of: ${SM_VARIABLE_TYPE_VALUES.join(", ")}.`
+          );
+          // Type-dependent checks below all assume a known type.
+          return;
+        }
+
+        const scale = smv.scale || {};
+
+        if (smv.type === "continuous") {
+          const { min, max } = scale;
+          if (typeof min !== "number" || typeof max !== "number" || min >= max) {
+            errors.push(`${tag} (continuous) requires scale.min < scale.max.`);
+          }
+        } else if (smv.type === "binary" || smv.type === "ordinal" || smv.type === "categorical") {
+          const states = scale.states;
+          if (!Array.isArray(states) || new Set(states).size !== states.length) {
+            errors.push(`${tag} (${smv.type}) requires scale.states as an array of unique values.`);
+          } else if (smv.type === "binary" && states.length !== 2) {
+            errors.push(`${tag} (binary) requires exactly 2 scale.states.`);
+          } else if (smv.type !== "binary" && states.length < 2) {
+            errors.push(`${tag} (${smv.type}) requires at least 2 scale.states.`);
+          }
+        }
+
+        const prior = smv.priorDistribution;
+        if (!prior || typeof prior !== "object" || !prior.family) {
+          errors.push(`${tag} requires a priorDistribution with a family.`);
+        } else if (smv.type && !isPriorFamilyCompatible(smv.type, prior.family)) {
+          errors.push(
+            `${tag} (${smv.type}) has incompatible priorDistribution.family '${prior.family}'. Allowed: ${priorFamiliesForSmVariableType(smv.type).join(", ")}.`
+          );
+        } else if (!priorDistributionParamsAreValid(prior.family, prior.params)) {
+          errors.push(`${tag} has invalid priorDistribution.params for family '${prior.family}'.`);
+        }
+      });
+    }
+  }
+
+  /* =====================================================
+     ASSEMBLY MODELS — Day 17 (structural), Day 21 (lifecycle)
+     -----------------------------------------------------
+     Structural + referential-integrity validation here. Promotion-
+     readiness completeness (what must be true for THIS status change to
+     be allowed, not just internally well-formed) lives in
+     validateAssemblyModelLifecycle (server/utils/lifecycleValidation.js),
+     the same separation of concerns taskModels/items already use. Full
+     version-migration governance (the multi-step chain competencyModels
+     has) is deliberately not built here -- out of scope for "legal
+     transitions + a promotion validator."
+  ===================================================== */
+
+  if (collection === "assemblyModels") {
+
+    if (!obj.name) errors.push("Assembly model name is required.");
+    if (!obj.competencyModelId) errors.push("competencyModelId is required.");
+    if (!obj.status) {
+      errors.push("status is required.");
+    } else if (!STATUS.includes(obj.status)) {
+      errors.push(`Invalid assembly model status '${obj.status}'.`);
+    }
+    if (obj.status === "confirmed" && !obj.locked) {
+      errors.push("Confirmed assembly models must be locked.");
+    }
+
+    const competencyModel = db && obj.competencyModelId
+      ? db.competencyModels?.find(m => m.id === obj.competencyModelId)
+      : undefined;
+
+    if (db && obj.competencyModelId && !competencyModel) {
+      errors.push(`Invalid competencyModelId: ${obj.competencyModelId}`);
+    }
+
+    const knownSmVariables = new Map(
+      (competencyModel?.smVariables || []).map(smv => [smv.id, smv])
+    );
+
+    if (obj.targetsBySMV !== undefined && !Array.isArray(obj.targetsBySMV)) {
+      errors.push("targetsBySMV should be array");
+    } else if (Array.isArray(obj.targetsBySMV)) {
+      const seenSmvIds = new Set();
+
+      obj.targetsBySMV.forEach((target, i) => {
+        const tag = `targetsBySMV[${i}]`;
+
+        if (!target || typeof target !== "object" || !target.smvId) {
+          errors.push(`${tag} requires an smvId.`);
+          return;
+        }
+
+        if (seenSmvIds.has(target.smvId)) {
+          errors.push(`${tag} duplicates target smvId '${target.smvId}'.`);
+        }
+        seenSmvIds.add(target.smvId);
+
+        // Only checkable once the competency model is resolvable; a
+        // dangling competencyModelId is already reported above and
+        // would make every target look "unknown" for the wrong reason.
+        if (competencyModel) {
+          const smv = knownSmVariables.get(target.smvId);
+          if (!smv) {
+            errors.push(`${tag} names smvId '${target.smvId}', which does not exist on competency model '${obj.competencyModelId}'.`);
+            return;
+          }
+
+          const hasSEM = typeof target.requiredSEM === "number";
+          const hasAccuracy = typeof target.requiredClassificationAccuracy === "number";
+
+          if (hasSEM === hasAccuracy) {
+            errors.push(`${tag} must specify exactly one of requiredSEM or requiredClassificationAccuracy.`);
+          } else if (smv.type === "continuous") {
+            if (!hasSEM) {
+              errors.push(`${tag} targets a continuous SMV ('${target.smvId}') and must specify requiredSEM, not requiredClassificationAccuracy.`);
+            } else if (target.requiredSEM <= 0) {
+              errors.push(`${tag} requiredSEM must be greater than 0.`);
+            }
+          } else {
+            if (!hasAccuracy) {
+              errors.push(`${tag} targets a ${smv.type} SMV ('${target.smvId}') and must specify requiredClassificationAccuracy, not requiredSEM.`);
+            } else if (target.requiredClassificationAccuracy <= 0 || target.requiredClassificationAccuracy > 1) {
+              errors.push(`${tag} requiredClassificationAccuracy must be in (0, 1].`);
+            }
+          }
+        }
+      });
+    }
+
+    if (obj.stoppingRules !== undefined && obj.stoppingRules !== null) {
+      const sr = obj.stoppingRules;
+      if (typeof sr !== "object" || Array.isArray(sr)) {
+        errors.push("stoppingRules should be object");
+      } else {
+        const { maxItems, minItems, targetsMet } = sr;
+        if (maxItems === undefined && minItems === undefined && targetsMet === undefined) {
+          errors.push("stoppingRules must declare at least one of maxItems, minItems or targetsMet.");
+        }
+        if (maxItems !== undefined && (typeof maxItems !== "number" || maxItems <= 0)) {
+          errors.push("stoppingRules.maxItems must be a positive number.");
+        }
+        if (minItems !== undefined && (typeof minItems !== "number" || minItems <= 0)) {
+          errors.push("stoppingRules.minItems must be a positive number.");
+        }
+        if (
+          typeof maxItems === "number" &&
+          typeof minItems === "number" &&
+          minItems > maxItems
+        ) {
+          errors.push("stoppingRules.minItems cannot exceed stoppingRules.maxItems.");
+        }
+        if (targetsMet !== undefined && typeof targetsMet !== "boolean") {
+          errors.push("stoppingRules.targetsMet should be boolean");
+        }
+      }
+    }
+
+    if (!obj.selectionAlgorithm || typeof obj.selectionAlgorithm !== "object") {
+      errors.push("selectionAlgorithm is required and must reference a policyId.");
+    } else if (!obj.selectionAlgorithm.policyId) {
+      errors.push("selectionAlgorithm.policyId is required.");
+    } else if (db && !db.policies?.find(p => p.id === obj.selectionAlgorithm.policyId)) {
+      errors.push(`Invalid selectionAlgorithm.policyId: ${obj.selectionAlgorithm.policyId}`);
+    }
+  }
+
+  /* =====================================================
+     Q-MATRIX MODELS — Day 18, Week 4 core schema
+     -----------------------------------------------------
+     Structural + referential-integrity validation only, mirroring
+     assemblyModels' Day 17 scope. Every `attributeIds` entry must be a
+     `binary`-type SMV -- a Q-matrix is defined over binary attributes by
+     construction, not merely "usually". No all-zero-row / identifiability
+     advisory checks yet; those are UI-facing (Q-matrix editor, W10).
+  ===================================================== */
+
+  if (collection === "qMatrixModels") {
+
+    if (!obj.name) errors.push("Q-matrix name is required.");
+    if (!obj.competencyModelId) errors.push("competencyModelId is required.");
+    if (!obj.status) {
+      errors.push("status is required.");
+    } else if (!STATUS.includes(obj.status)) {
+      errors.push(`Invalid Q-matrix status '${obj.status}'.`);
+    }
+    if (obj.status === "confirmed" && !obj.locked) {
+      errors.push("Confirmed Q-matrix models must be locked.");
+    }
+
+    const competencyModel = db && obj.competencyModelId
+      ? db.competencyModels?.find(m => m.id === obj.competencyModelId)
+      : undefined;
+
+    if (db && obj.competencyModelId && !competencyModel) {
+      errors.push(`Invalid competencyModelId: ${obj.competencyModelId}`);
+    }
+
+    const knownSmVariables = new Map(
+      (competencyModel?.smVariables || []).map(smv => [smv.id, smv])
+    );
+
+    const declaredAttributeIds = new Set();
+
+    if (obj.attributeIds !== undefined && !Array.isArray(obj.attributeIds)) {
+      errors.push("attributeIds should be array");
+    } else if (Array.isArray(obj.attributeIds)) {
+      obj.attributeIds.forEach((attrId, i) => {
+        if (declaredAttributeIds.has(attrId)) {
+          errors.push(`Duplicate attributeIds entry '${attrId}'.`);
+        }
+        declaredAttributeIds.add(attrId);
+
+        // Only checkable once the competency model is resolvable; a
+        // dangling competencyModelId is already reported above.
+        if (competencyModel) {
+          const smv = knownSmVariables.get(attrId);
+          if (!smv) {
+            errors.push(`attributeIds[${i}] names '${attrId}', which does not exist on competency model '${obj.competencyModelId}'.`);
+          } else if (smv.type !== "binary") {
+            errors.push(`attributeIds[${i}] ('${attrId}') is a '${smv.type}' Student Model Variable. Q-matrix attributes must be binary.`);
+          }
+        }
+      });
+    }
+
+    if (obj.entries !== undefined && !Array.isArray(obj.entries)) {
+      errors.push("entries should be array");
+    } else if (Array.isArray(obj.entries)) {
+      const seenPairs = new Set();
+
+      obj.entries.forEach((entry, i) => {
+        const tag = `entries[${i}]`;
+
+        if (!entry || typeof entry !== "object" || !entry.itemId || !entry.attributeId) {
+          errors.push(`${tag} requires both itemId and attributeId.`);
+          return;
+        }
+
+        const pairKey = `${entry.itemId}::${entry.attributeId}`;
+        if (seenPairs.has(pairKey)) {
+          errors.push(`${tag} duplicates the (itemId, attributeId) pair for '${entry.itemId}' / '${entry.attributeId}'.`);
+        }
+        seenPairs.add(pairKey);
+
+        if (!declaredAttributeIds.has(entry.attributeId)) {
+          errors.push(`${tag} references attributeId '${entry.attributeId}', which is not declared in attributeIds.`);
+        }
+
+        if (db && !db.items?.find(it => it.id === entry.itemId)) {
+          errors.push(`${tag} references unknown itemId '${entry.itemId}'.`);
+        }
+
+        if (entry.required !== undefined && typeof entry.required !== "boolean") {
+          errors.push(`${tag}.required should be boolean`);
+        }
+      });
+    }
+  }
+
+  /* =====================================================
+     COMPOSITE LIBRARY — Day 19, Week 4 core schema
+     -----------------------------------------------------
+     Structural + referential-integrity validation only. The builder
+     that actually compiles one of these from a Task Model is Day 24;
+     this just gives it a real shape to write into.
+  ===================================================== */
+
+  if (collection === "compositeLibrary") {
+
+    if (!obj.taskModelId) errors.push("taskModelId is required.");
+    if (typeof obj.taskModelVersion !== "number") errors.push("taskModelVersion is required and must be a number.");
+    if (!obj.compiledAt) errors.push("compiledAt is required.");
+
+    const taskModel = db && obj.taskModelId
+      ? db.taskModels?.find(tm => tm.id === obj.taskModelId)
+      : undefined;
+
+    if (db && obj.taskModelId && !taskModel) {
+      errors.push(`Invalid taskModelId: ${obj.taskModelId}`);
+    }
+
+    if (obj.items !== undefined && !Array.isArray(obj.items)) {
+      errors.push("items should be array");
+    } else if (Array.isArray(obj.items)) {
+      obj.items.forEach((entry, i) => {
+        const tag = `items[${i}]`;
+
+        if (!entry || typeof entry !== "object" || !entry.itemId) {
+          errors.push(`${tag} requires an itemId.`);
+          return;
+        }
+
+        if (db) {
+          const item = db.items?.find(it => it.id === entry.itemId);
+          if (!item) {
+            errors.push(`${tag} references unknown itemId '${entry.itemId}'.`);
+          } else if (item.taskModelId !== obj.taskModelId) {
+            errors.push(`${tag} ('${entry.itemId}') belongs to taskModelId '${item.taskModelId}', not this library's '${obj.taskModelId}'.`);
+          }
+        }
+      });
+    }
+
+    // At most one compiled package may be the ACTIVE one for a given
+    // Task Model -- the same "exactly one active X" invariant
+    // statisticalModels enforces above, so exactly one version is ever
+    // being served at a time.
+    if (obj.active && db && obj.taskModelId) {
+      const otherActive = db.compositeLibrary?.find(
+        cl => cl.id !== obj.id && cl.taskModelId === obj.taskModelId && cl.active
+      );
+      if (otherActive) {
+        errors.push(`Task model '${obj.taskModelId}' already has an active composite library package ('${otherActive.id}').`);
       }
     }
   }

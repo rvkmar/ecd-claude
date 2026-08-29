@@ -46,6 +46,8 @@ import {
 import { validateItemLifecycle } from "../utils/lifecycleValidation.js";
 import { canTransition, TRANSITIONS } from "../utils/lifecycleMatrix.js";
 import { liveSessionsForItem } from "../utils/sessionDependencies.js";
+import { recordItemUsage } from "../utils/itemExposure.js";
+import { SESSION_STATUS } from "../../src/utils/sessionStatus.js";
 
 const router = express.Router();
 
@@ -628,7 +630,7 @@ router.get("/:id/dependents", (req, res) => {
     liveSessions: live.map((s) => ({
       id: s.id,
       studentId: s.studentId ?? null,
-      status: s.status ?? "in-progress",
+      status: s.status ?? SESSION_STATUS.IN_PROGRESS,
     })),
   });
 });
@@ -846,47 +848,26 @@ router.post("/:id/record-usage", canAuthor, (req, res) => {
 
   if (index === -1) return res.status(404).json({ error: "Item not found." });
 
-  const item = items[index];
+  // Day 29: the actual increment/auto-retire logic now lives in
+  // server/utils/itemExposure.js, shared with the item-based session
+  // delivery path (server/routes/sessionRoutes.js) -- see that module's
+  // header for why this couldn't just be an internal HTTP call instead.
+  const result = recordItemUsage(items[index], db, { count: req.body?.count });
 
-  if (item.status !== "operational") {
-    return res.status(409).json({
-      error: `Only an operational item accrues exposure (this one is '${item.status}').`,
-    });
+  if (!result.ok) {
+    if (result.details) return validationFailure(res, result.details, result.error);
+    return res.status(409).json({ error: result.error });
   }
 
-  const delta = Number.isFinite(req.body?.count) ? Math.max(1, req.body.count) : 1;
-
-  const exposure = {
-    ...item.exposureControl,
-    usageCount: (item.exposureControl?.usageCount || 0) + delta,
-  };
-
-  const ceiling = exposure.maxUsageBeforeRetire || 0;
-  const exhausted = ceiling > 0 && exposure.usageCount >= ceiling;
-
-  const updated = {
-    ...item,
-    exposureControl: exposure,
-    // Auto-retirement is what the ceiling is FOR. operational ->
-    // suspended is a single legal transition, so unlike the old
-    // confirmed -> suspended rewrite it does not trip the matrix.
-    status: exhausted ? "suspended" : item.status,
-    updatedAt: now(),
-  };
-
-  const { valid, errors } = validateEntity("items", updated, db, { strict: true });
-
-  if (!valid) return validationFailure(res, errors, "Exposure update failed validation.");
-
-  items[index] = updated;
+  items[index] = result.item;
   db.items = items;
   saveDB(db);
 
   res.json({
-    usageCount: exposure.usageCount,
-    maxUsageBeforeRetire: ceiling,
-    status: updated.status,
-    autoSuspended: exhausted,
+    usageCount: result.usageCount,
+    maxUsageBeforeRetire: result.maxUsageBeforeRetire,
+    status: result.status,
+    autoSuspended: result.autoSuspended,
   });
 });
 
