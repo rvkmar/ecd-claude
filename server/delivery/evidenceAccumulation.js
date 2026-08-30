@@ -860,6 +860,60 @@ export function accumulateEvidence(session, db, options = {}) {
 }
 
 /**
+ * Day 33 (Week 7): write an accumulateEvidence() result onto a session's
+ * persisted student model, at `session.studentModel.smvPosteriors[smvId]`.
+ * See schema.js's `sessions` deep validation for the shape this produces
+ * and validates identically -- the "one pointer, validated on both sides"
+ * invariant (Part 1.3) applied here.
+ *
+ * Deliberately still pure (mutates and returns the SESSION OBJECT, no
+ * database or HTTP concern) -- matching every other function in this file,
+ * and matching evidenceIdentification.js's own precedent of stopping at
+ * "here is the record to store," with the actual persistence call left to
+ * the route that owns the request lifecycle (Day 34: wiring this into
+ * sessionRoutes.js's item-based /submit path).
+ *
+ * Only a `supported: true` posterior is written. A refusal
+ * (`supported: false`) is silence about that SMV, not a claim that its
+ * ability is now unknown or zero -- overwriting a real prior measurement
+ * with "no measurement" would throw away information the refusal itself
+ * did not invalidate. Whatever posterior was persisted from an earlier,
+ * successful accumulation step is left exactly as it was.
+ */
+export function applyPosteriorsToSession(session, accumulationResult, options = {}) {
+  if (!session) throw new Error("applyPosteriorsToSession requires a session.");
+  if (!accumulationResult) throw new Error("applyPosteriorsToSession requires an accumulateEvidence() result.");
+
+  const updatedAt = options.now || new Date().toISOString();
+
+  if (!session.studentModel) session.studentModel = {};
+  if (!session.studentModel.smvPosteriors) session.studentModel.smvPosteriors = {};
+
+  for (const posterior of accumulationResult.posteriors || []) {
+    if (!posterior.supported) continue;
+
+    session.studentModel.smvPosteriors[posterior.smvId] = {
+      smvId: posterior.smvId,
+      smvType: posterior.smvType,
+      evidenceModelId: posterior.evidenceModelId,
+      parameterSetId: posterior.parameterSetId,
+      modelFamily: posterior.modelFamily,
+      method: posterior.method,
+      estimate: posterior.estimate,
+      precision: posterior.precision,
+      sem: posterior.sem,
+      responsesUsed: posterior.responsesUsed,
+      responsesExcluded: posterior.responsesExcluded,
+      boundaryLimited: posterior.boundaryLimited === true,
+      refined: posterior.refined === true,
+      updatedAt,
+    };
+  }
+
+  return session;
+}
+
+/**
  * Day 31 scope: resolve the SMV a statistical model updates, WITHOUT
  * guessing. An explicit binding is honoured if one is present (forward-
  * compatible with Day 34, which makes that binding a real, validated

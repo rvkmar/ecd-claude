@@ -18,7 +18,8 @@
 //      back as `supported: false` with a reason, never as a number.
 
 import { describe, it, expect } from "vitest";
-import { accumulateEvidence, __testing__ } from "../evidenceAccumulation.js";
+import { accumulateEvidence, applyPosteriorsToSession, __testing__ } from "../evidenceAccumulation.js";
+import { validateEntity } from "../../../src/utils/schema.js";
 
 const { estimateContinuousPosterior, buildQuadrature, itemProbability, scoreResponse } = __testing__;
 
@@ -1346,5 +1347,136 @@ describe("accumulateEvidence — the raw-score family end to end", () => {
     const up = accumulateEvidence(sessionWith([makeResponse({ activated: true })]), db);
     const down = accumulateEvidence(sessionWith([makeResponse({ activated: false })]), db);
     expect(up.posteriors[0].estimate).toBeGreaterThan(down.posteriors[0].estimate);
+  });
+});
+
+/* ------------------------------------------------------------------
+   Day 33 (Week 7): applyPosteriorsToSession -- persisting the result onto
+   session.studentModel.smvPosteriors. See schema.js's `sessions` deep
+   validation for the shape this must match exactly (the "one pointer,
+   validated on both sides" invariant applied to a map key).
+------------------------------------------------------------------ */
+
+describe("applyPosteriorsToSession — persisting the result onto the session", () => {
+  function accumulationResult(overrides = {}) {
+    return {
+      posteriors: [{
+        smvId: "smv1",
+        smvType: "continuous",
+        evidenceModelId: "em1",
+        parameterSetId: "ps1",
+        modelFamily: "irt",
+        method: "eap",
+        supported: true,
+        estimate: 0.83,
+        precision: 0.41,
+        sem: 0.41,
+        responsesUsed: 5,
+        responsesExcluded: 1,
+        boundaryLimited: false,
+        ...overrides,
+      }],
+      warnings: [],
+    };
+  }
+
+  it("creates studentModel.smvPosteriors on a session that has neither", () => {
+    const session = { id: "s1" };
+    const result = applyPosteriorsToSession(session, accumulationResult(), { now: "2026-08-30T00:00:00.000Z" });
+
+    expect(result).toBe(session); // mutates and returns the same object
+    expect(session.studentModel.smvPosteriors.smv1).toEqual({
+      smvId: "smv1",
+      smvType: "continuous",
+      evidenceModelId: "em1",
+      parameterSetId: "ps1",
+      modelFamily: "irt",
+      method: "eap",
+      estimate: 0.83,
+      precision: 0.41,
+      sem: 0.41,
+      responsesUsed: 5,
+      responsesExcluded: 1,
+      boundaryLimited: false,
+      refined: false,
+      updatedAt: "2026-08-30T00:00:00.000Z",
+    });
+  });
+
+  it("is readable immediately after being written -- the D33 exit check", () => {
+    const session = { id: "s1" };
+    applyPosteriorsToSession(session, accumulationResult());
+    expect(session.studentModel.smvPosteriors.smv1.estimate).toBe(0.83);
+    expect(session.studentModel.smvPosteriors.smv1.precision).toBe(0.41);
+  });
+
+  it("preserves an existing prior measurement's studentModel keys it doesn't own", () => {
+    const session = { id: "s1", studentModel: { irtTheta: 0.4 } };
+    applyPosteriorsToSession(session, accumulationResult());
+    expect(session.studentModel.irtTheta).toBe(0.4);
+    expect(session.studentModel.smvPosteriors.smv1.estimate).toBe(0.83);
+  });
+
+  it("does NOT write a refused (supported: false) posterior, and does not disturb an earlier real one", () => {
+    const session = { id: "s1" };
+    applyPosteriorsToSession(session, accumulationResult({ estimate: 0.5 }));
+
+    const refusal = { posteriors: [{ evidenceModelId: "em1", supported: false, reason: "mixed parameter sets" }], warnings: [] };
+    applyPosteriorsToSession(session, refusal);
+
+    // The earlier real measurement is untouched -- a refusal is silence,
+    // not a claim that the ability is now unknown or zero.
+    expect(session.studentModel.smvPosteriors.smv1.estimate).toBe(0.5);
+  });
+
+  it("overwrites a prior posterior for the same SMV with a newer one", () => {
+    const session = { id: "s1" };
+    applyPosteriorsToSession(session, accumulationResult({ estimate: 0.5, responsesUsed: 3 }), { now: "2026-08-30T00:00:00.000Z" });
+    applyPosteriorsToSession(session, accumulationResult({ estimate: 0.6, responsesUsed: 4 }), { now: "2026-08-30T01:00:00.000Z" });
+
+    expect(session.studentModel.smvPosteriors.smv1.estimate).toBe(0.6);
+    expect(session.studentModel.smvPosteriors.smv1.responsesUsed).toBe(4);
+    expect(session.studentModel.smvPosteriors.smv1.updatedAt).toBe("2026-08-30T01:00:00.000Z");
+  });
+
+  it("keeps multiple SMVs distinct, keyed independently", () => {
+    const session = { id: "s1" };
+    applyPosteriorsToSession(session, {
+      posteriors: [
+        { smvId: "smv1", smvType: "continuous", evidenceModelId: "em1", parameterSetId: "ps1", modelFamily: "irt", method: "eap", supported: true, estimate: 0.1, precision: 0.2, sem: 0.2, responsesUsed: 1, responsesExcluded: 0 },
+        { smvId: "smv2", smvType: "binary", evidenceModelId: "em2", parameterSetId: "ps2", modelFamily: "sum", method: "weighted-proportion", supported: true, estimate: 0.9, precision: 0.3, sem: 0.3, responsesUsed: 2, responsesExcluded: 0 },
+      ],
+      warnings: [],
+    });
+
+    expect(Object.keys(session.studentModel.smvPosteriors).sort()).toEqual(["smv1", "smv2"]);
+    expect(session.studentModel.smvPosteriors.smv1.estimate).toBe(0.1);
+    expect(session.studentModel.smvPosteriors.smv2.estimate).toBe(0.9);
+  });
+
+  it("round-trips through accumulateEvidence and passes schema.js's own validateEntity", () => {
+    const db = makeDb();
+    const session = sessionWith([makeResponse()]);
+    const result = accumulateEvidence(session, db);
+
+    applyPosteriorsToSession(session, result);
+
+    expect(session.studentModel.smvPosteriors["smv-theta"].supported).toBeUndefined();
+    expect(session.studentModel.smvPosteriors["smv-theta"].estimate).toBe(result.posteriors[0].estimate);
+
+    // The actual D33 exit check: schema.js validates the persisted shape,
+    // not just this file's own idea of what it should look like. Checked
+    // with status "draft" -- this file's own accumulateEvidence fixtures
+    // were never built to also satisfy the UNRELATED response-provenance
+    // checks that the "sessions" validator runs for in_progress/submitted
+    // sessions (evidenceModelVersion, competencyModelVersion, etc.), and
+    // pinning those too would test something this file doesn't own.
+    const { errors } = validateEntity("sessions", { ...session, status: "draft" }, db);
+    expect(errors).toEqual([]);
+  });
+
+  it("throws for programmer errors (no session, no result), never silently no-ops", () => {
+    expect(() => applyPosteriorsToSession(null, accumulationResult())).toThrow();
+    expect(() => applyPosteriorsToSession({ id: "s1" }, null)).toThrow();
   });
 });
