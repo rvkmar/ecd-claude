@@ -4,6 +4,8 @@ import { loadDB, saveDB, finishSession } from "../../src/utils/db-server.js";
 import { validateEntity } from "../../src/utils/schema.js";
 import { SESSION_STATUS } from "../../src/utils/sessionStatus.js";
 import { identifyEvidence } from "../delivery/evidenceIdentification.js";
+import { accumulateEvidence, applyPosteriorsToSession } from "../delivery/evidenceAccumulation.js";
+import { resolveAssemblyProgress } from "../delivery/assemblyProgress.js";
 import { recordItemUsage } from "../utils/itemExposure.js";
 import { log2 } from "mathjs"; // if not available, define inline
 
@@ -330,13 +332,40 @@ router.post("/:id/submit", async (req, res) => {
       response.exposureNote = usageResult.error;
     }
 
+    // Day 34 (Week 7): Evidence Accumulation, run immediately after the
+    // response above is scored and pushed. accumulateEvidence() re-derives
+    // its posterior from session.responses (already updated) on every
+    // call -- there is no incremental state to corrupt, so re-running it
+    // over the whole history each submit is the same amount of work as
+    // "just this response" would be, and is simpler and more obviously
+    // correct than trying to update a posterior in place.
+    //
+    // Wrapped defensively: by this point the student's response has
+    // already been validly scored and exposure-recorded above. A defect
+    // in accumulation -- a module explicitly built to REFUSE rather than
+    // guess, so a thrown error here should mean a genuine bug, not a
+    // plausible data situation -- must never roll back or block a response
+    // that already happened. Mirrors recordItemUsage's exposureNote
+    // pattern immediately above: a bookkeeping failure is surfaced, not
+    // allowed to fail the request.
+    let assemblyProgress = [];
+    try {
+      const accumulation = accumulateEvidence(session, db);
+      applyPosteriorsToSession(session, accumulation);
+      assemblyProgress = resolveAssemblyProgress(accumulation.posteriors, db);
+    } catch (err) {
+      response.accumulationNote = `Evidence accumulation failed: ${err.message}`;
+    }
+
     const { valid, errors } = validateEntity("sessions", session, db);
     if (!valid) {
       return res.status(400).json({ error: "Schema validation failed", details: errors });
     }
 
     saveDB(db);
-    return res.json(session);
+    // `assemblyProgress` is surfaced in the response only -- see its own
+    // module header for why it is never persisted or acted on here.
+    return res.json({ ...session, assemblyProgress });
   }
 
   // 🔹 Validation: observationId & evidenceId

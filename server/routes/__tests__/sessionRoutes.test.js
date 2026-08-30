@@ -321,6 +321,110 @@ describe("POST /:id/submit — item-based delivery (Day 28)", () => {
     expect(response.questionId).toBe("q1");
     expect(response.scoredValue).toBe(1);
     expect(response).not.toHaveProperty("activated");
+    // The legacy path never touches assemblyProgress at all -- it returns
+    // res.json(session) unchanged, not the item path's spread.
+    expect(response).not.toHaveProperty("assemblyProgress");
+    expect(res.body).not.toHaveProperty("assemblyProgress");
+  });
+});
+
+// ---------------------------------------------------------------------
+// Day 34 (Week 7): wiring Evidence Accumulation into the item-based
+// /submit path, immediately after the response above is scored.
+// ---------------------------------------------------------------------
+describe("POST /:id/submit — Evidence Accumulation wired in (Day 34)", () => {
+  // The base fixtures above have no competencyId/competencies/
+  // competencyModels at all -- accumulateEvidence() resolves through that
+  // chain, so this fixture set adds the minimum needed for it to actually
+  // resolve a Student Model Variable and produce a real posterior, rather
+  // than a (still crash-free) refusal.
+  function makeDbWithCompetency(overrides = {}) {
+    return makeDb({
+      evidenceModels: [{ ...evidenceModel, competencyId: "c1", competencyModelVersion: 1 }],
+      competencies: [{ id: "c1", modelId: "cm1" }],
+      competencyModels: [{
+        id: "cm1",
+        versionNumber: 1,
+        smVariables: [{
+          id: "smv1",
+          type: "continuous",
+          priorDistribution: { family: "normal", params: { mean: 0, sd: 1 } },
+        }],
+      }],
+      ...overrides,
+    });
+  }
+
+  it("a submit updates and returns the session's SMV posterior -- the D34 exit check", async () => {
+    const db = makeDbWithCompetency();
+    const app = buildApp(db);
+
+    const res = await request(app)
+      .post("/api/sessions/s1/submit")
+      .send({ taskId: "t1", itemId: "item1", rawAnswer: "opt_a" });
+
+    expect(res.status).toBe(200);
+    const posterior = res.body.studentModel.smvPosteriors.smv1;
+    expect(posterior).toBeTruthy();
+    expect(Number.isFinite(posterior.estimate)).toBe(true);
+    expect(Number.isFinite(posterior.precision)).toBe(true);
+    expect(posterior.responsesUsed).toBe(1);
+  });
+
+  it("does not crash and still scores the response when accumulation cannot resolve an SMV (no competencyModels declared)", async () => {
+    const db = makeDb(); // the plain fixture -- no competencies/competencyModels
+    const app = buildApp(db);
+
+    const res = await request(app)
+      .post("/api/sessions/s1/submit")
+      .send({ taskId: "t1", itemId: "item1", rawAnswer: "opt_a" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.responses[0].activated).toBe(true);
+    expect(res.body.studentModel?.smvPosteriors ?? {}).toEqual({});
+    expect(res.body.assemblyProgress).toEqual([]);
+  });
+
+  it("surfaces Assembly Model progress toward the stopping criterion, without acting on it", async () => {
+    const db = makeDbWithCompetency({
+      assemblyModels: [{
+        id: "am1",
+        competencyModelId: "cm1",
+        targetsBySMV: [{ smvId: "smv1", requiredSEM: 5 }], // deliberately loose: one response should already meet it
+      }],
+    });
+    const app = buildApp(db);
+
+    const res = await request(app)
+      .post("/api/sessions/s1/submit")
+      .send({ taskId: "t1", itemId: "item1", rawAnswer: "opt_a" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.assemblyProgress).toEqual([{
+      smvId: "smv1",
+      assemblyModelId: "am1",
+      estimate: res.body.studentModel.smvPosteriors.smv1.estimate,
+      precision: res.body.studentModel.smvPosteriors.smv1.precision,
+      requiredSEM: 5,
+      stoppingCriterionMet: true,
+    }]);
+    // Purely informational: the session is not auto-completed or altered
+    // by having met the target. Stopping is W11 scope.
+    expect(res.body.isCompleted).toBe(false);
+  });
+
+  it("persists the posterior across successive submits within the same session", async () => {
+    const db = makeDbWithCompetency({
+      tasks: [makeTask({ id: "t1" }), makeTask({ id: "t2" })],
+      sessions: [makeSession({ taskIds: ["t1", "t2"] })],
+    });
+    const app = buildApp(db);
+
+    await request(app).post("/api/sessions/s1/submit").send({ taskId: "t1", itemId: "item1", rawAnswer: "opt_a" });
+    const res2 = await request(app).post("/api/sessions/s1/submit").send({ taskId: "t2", itemId: "item1", rawAnswer: "opt_a" });
+
+    expect(res2.status).toBe(200);
+    expect(res2.body.studentModel.smvPosteriors.smv1.responsesUsed).toBe(2);
   });
 });
 
