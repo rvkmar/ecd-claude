@@ -446,6 +446,15 @@ export const schema = {
     taskIds: 'array',
     currentTaskIndex: 'number',
     responses: [],
+    // Deliberately untyped here -- see the deep validation block below
+    // (`if (collection === "sessions")`) for the real structural checks on
+    // `studentModel.smvPosteriors` (Day 33), the item-based Evidence
+    // Accumulation posterior per Student Model Variable: { smvId, smvType,
+    // evidenceModelId, parameterSetId, modelFamily, method, estimate,
+    // precision, sem, responsesUsed, responsesExcluded, updatedAt }, keyed
+    // by smvId. `studentModel.irtTheta`/`.bnPosteriors` are a separate,
+    // pre-existing shape belonging to the legacy db.questions adaptive-
+    // selection path -- not reused or extended by the new field.
     studentModel: 'object',
     selectionStrategy: 'string',
     nextTaskPolicy: 'object',
@@ -3652,6 +3661,92 @@ export function validateEntity(collection, obj, db = null, options = {}) {
   ===================================================== */
 
   if (collection === "sessions") {
+
+    /* Day 33 (Week 7): the persisted shape of an accumulated Student Model
+       Variable posterior -- server/delivery/evidenceAccumulation.js's
+       applyPosteriorsToSession() is the one producer, this is the one
+       validator, and the "smvPosteriors[smvId].smvId === smvId" check
+       below is the "one pointer, validated on both sides" invariant
+       (Part 1.3) applied to a MAP KEY instead of a foreign-id field: the
+       key and the stored copy of the id can't be allowed to disagree with
+       each other.
+
+       Deliberately a NEW field (studentModel.smvPosteriors), not a reuse
+       of the pre-existing studentModel.irtTheta/bnPosteriors -- those
+       belong to the legacy, still-live db.questions adaptive-selection
+       path (see reportsRoutes.js, sessionRoutes.js) and are keyed and
+       shaped for a different purpose (a single scalar theta; a flat
+       node-id -> probability map for a Bayesian network's CPT nodes, with
+       no per-entry provenance at all). Overloading either field with the
+       new item-based accumulation's {estimate, precision, ...} per-SMV
+       shape would silently conflate two unrelated concepts under one name
+       -- exactly what the "one pointer" invariant exists to prevent.
+
+       Runs unconditionally (not gated on status, unlike the provenance
+       loop below) because a malformed posterior is a structural defect
+       regardless of what stage the session is in, and posteriors
+       accumulate continuously while a session is still in progress. */
+    if (obj.studentModel?.smvPosteriors !== undefined) {
+
+      const smvPosteriors = obj.studentModel.smvPosteriors;
+
+      if (
+        typeof smvPosteriors !== "object" ||
+        smvPosteriors === null ||
+        Array.isArray(smvPosteriors)
+      ) {
+        errors.push(
+          "studentModel.smvPosteriors must be an object keyed by Student Model Variable id."
+        );
+      } else {
+        for (const [smvId, posterior] of Object.entries(smvPosteriors)) {
+
+          const prefix = `studentModel.smvPosteriors['${smvId}']`;
+
+          if (!posterior || typeof posterior !== "object") {
+            errors.push(`${prefix} must be an object.`);
+            continue;
+          }
+
+          if (posterior.smvId !== smvId) {
+            errors.push(`${prefix}.smvId ('${posterior.smvId}') must match its own key ('${smvId}').`);
+          }
+
+          for (const field of ["evidenceModelId", "parameterSetId", "modelFamily", "method"]) {
+            if (typeof posterior[field] !== "string" || !posterior[field]) {
+              errors.push(`${prefix}.${field} must be a non-empty string.`);
+            }
+          }
+
+          if (!Number.isFinite(posterior.estimate)) {
+            errors.push(`${prefix}.estimate must be a finite number.`);
+          }
+
+          // Precision is the whole point of persisting a DISTRIBUTION and
+          // not a bare point estimate -- see evidenceAccumulation.js's own
+          // header. A negative or non-finite value here would be exactly
+          // the "confidently wrong number" that module's entire design
+          // exists to prevent from ever being produced in the first place;
+          // this is the check that stops one from being written even if it
+          // were.
+          if (!(Number.isFinite(posterior.precision) && posterior.precision >= 0)) {
+            errors.push(`${prefix}.precision must be a non-negative finite number.`);
+          }
+
+          if (!(Number.isFinite(posterior.responsesUsed) && posterior.responsesUsed >= 0)) {
+            errors.push(`${prefix}.responsesUsed must be a non-negative number.`);
+          }
+
+          if (!(Number.isFinite(posterior.responsesExcluded) && posterior.responsesExcluded >= 0)) {
+            errors.push(`${prefix}.responsesExcluded must be a non-negative number.`);
+          }
+
+          if (typeof posterior.updatedAt !== "string" || Number.isNaN(Date.parse(posterior.updatedAt))) {
+            errors.push(`${prefix}.updatedAt must be an ISO date string.`);
+          }
+        }
+      }
+    }
 
     if (db && [SESSION_STATUS.IN_PROGRESS, SESSION_STATUS.SUBMITTED, "reviewed"].includes(obj.status)) {
 

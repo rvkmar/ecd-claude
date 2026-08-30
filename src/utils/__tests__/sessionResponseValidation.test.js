@@ -125,3 +125,122 @@ describe("sessions.responses — provenance checks are scoped to item-based resp
     expect(errors.join(" ")).toMatch(/Session evidenceModelVersion mismatch/);
   });
 });
+
+/* ------------------------------------------------------------------
+   Day 33 (Week 7): studentModel.smvPosteriors -- the persisted shape of
+   an accumulateEvidence() result. See evidenceAccumulation.js's
+   applyPosteriorsToSession(), the one producer this shape is validated
+   against.
+------------------------------------------------------------------ */
+
+function validPosterior(overrides = {}) {
+  return {
+    smvId: "smv1",
+    smvType: "continuous",
+    evidenceModelId: "em1",
+    parameterSetId: "ps1",
+    modelFamily: "irt",
+    method: "eap",
+    estimate: 0.5,
+    precision: 0.3,
+    sem: 0.3,
+    responsesUsed: 4,
+    responsesExcluded: 0,
+    updatedAt: "2026-08-30T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function sessionWithPosteriors(smvPosteriors) {
+  return {
+    id: "s1",
+    studentId: "u1",
+    taskIds: ["t1"],
+    currentTaskIndex: 1,
+    responses: [],
+    status: "in_progress",
+    studentModel: { smvPosteriors },
+  };
+}
+
+describe("sessions.studentModel.smvPosteriors — the accumulated posterior's persisted shape", () => {
+  it("a well-formed posterior, correctly keyed, passes cleanly", () => {
+    const { errors } = validateEntity("sessions", sessionWithPosteriors({ smv1: validPosterior() }), makeDb());
+    expect(errors).toEqual([]);
+  });
+
+  it("a session with no smvPosteriors at all is unaffected (backward compatible)", () => {
+    const session = { id: "s1", studentId: "u1", taskIds: ["t1"], currentTaskIndex: 0, responses: [], status: "draft" };
+    const { errors } = validateEntity("sessions", session, makeDb());
+    expect(errors).toEqual([]);
+  });
+
+  it("the legacy studentModel.irtTheta/bnPosteriors shape is untouched by this check", () => {
+    const session = sessionWithPosteriors(undefined);
+    session.studentModel = { irtTheta: 0.4, stderr: 0.2, bnPosteriors: { node1: 0.7 } };
+    const { errors } = validateEntity("sessions", session, makeDb());
+    expect(errors).toEqual([]);
+  });
+
+  it("rejects smvPosteriors that is not an object map (e.g. an array)", () => {
+    const { errors } = validateEntity("sessions", sessionWithPosteriors([validPosterior()]), makeDb());
+    expect(errors.join(" ")).toMatch(/must be an object keyed by Student Model Variable id/);
+  });
+
+  it("rejects a posterior whose smvId does not match its own map key (the 'one pointer' check)", () => {
+    const { errors } = validateEntity(
+      "sessions",
+      sessionWithPosteriors({ smv1: validPosterior({ smvId: "smv-other" }) }),
+      makeDb()
+    );
+    expect(errors.join(" ")).toMatch(/smvId \('smv-other'\) must match its own key \('smv1'\)/);
+  });
+
+  it("rejects a posterior missing a required string field", () => {
+    const { errors } = validateEntity(
+      "sessions",
+      sessionWithPosteriors({ smv1: validPosterior({ evidenceModelId: undefined }) }),
+      makeDb()
+    );
+    expect(errors.join(" ")).toMatch(/evidenceModelId must be a non-empty string/);
+  });
+
+  it("rejects a non-finite estimate", () => {
+    const { errors } = validateEntity(
+      "sessions",
+      sessionWithPosteriors({ smv1: validPosterior({ estimate: NaN }) }),
+      makeDb()
+    );
+    expect(errors.join(" ")).toMatch(/estimate must be a finite number/);
+  });
+
+  it("rejects a negative precision -- the exact 'confidently wrong number' this shape exists to prevent", () => {
+    const { errors } = validateEntity(
+      "sessions",
+      sessionWithPosteriors({ smv1: validPosterior({ precision: -0.1 }) }),
+      makeDb()
+    );
+    expect(errors.join(" ")).toMatch(/precision must be a non-negative finite number/);
+  });
+
+  it("rejects a non-ISO updatedAt", () => {
+    const { errors } = validateEntity(
+      "sessions",
+      sessionWithPosteriors({ smv1: validPosterior({ updatedAt: "not-a-date" }) }),
+      makeDb()
+    );
+    expect(errors.join(" ")).toMatch(/updatedAt must be an ISO date string/);
+  });
+
+  it("validates every entry in a multi-SMV map independently", () => {
+    const { errors } = validateEntity(
+      "sessions",
+      sessionWithPosteriors({
+        smv1: validPosterior(),
+        smv2: validPosterior({ smvId: "smv2", precision: -1 }),
+      }),
+      makeDb()
+    );
+    expect(errors.join(" ")).toMatch(/smvPosteriors\['smv2'\]\.precision/);
+  });
+});
