@@ -1117,3 +1117,234 @@ describe("FIXED 6 — a degenerate declared prior is refused rather than default
     expect(posteriors[0].reason).toMatch(/quadrature grid/);
   });
 });
+
+/* ------------------------------------------------------------------
+   CTT / SUM / THRESHOLD -- the raw-score family (authoritative D31's
+   original exit check: "arithmetic, lowest risk" paths, hand-computed
+   fixtures, proving the per-family dispatch shape).
+------------------------------------------------------------------ */
+
+const { resolveObservationWeight, estimateRawScore } = __testing__;
+
+const binarySmv = (overrides = {}) => ({
+  id: "smv-mastery",
+  label: "Mastery",
+  type: "binary",
+  ...overrides,
+});
+
+function rawScoreDb({ type = "sum", smv = binarySmv(), items = [], taskModels = [] } = {}) {
+  return {
+    competencyModels: [{ id: "cm1", versionNumber: 1, smVariables: [smv] }],
+    competencies: [{ id: "c1", modelId: "cm1" }],
+    evidenceModels: [{
+      id: "em1",
+      competencyId: "c1",
+      versionNumber: 1,
+      observables: [{ id: "o1", evidenceRule: { direction: "supports", strengthLevel: 4 } }],
+      statisticalModels: [{
+        id: "sm1",
+        type,
+        active: true,
+        structureConfig: {},
+        parameterSets: [{
+          parameterSetId: "ps1",
+          parameters: {},
+          packageVersion: "pilot-1",
+          converged: true,
+          sampleSize: 500,
+          calibratedAt: "2026-01-01T00:00:00.000Z",
+        }],
+        activeParameterSetId: "ps1",
+      }],
+    }],
+    items,
+    taskModels,
+  };
+}
+
+describe("estimateRawScore — the CTT/sum/threshold arithmetic, hand-computed", () => {
+  it("a single correct, unit-weight response: p=1, but the SE is NOT zero", () => {
+    // Hand computation:
+    //   totalWeight = 1, weightedCorrect = 1, estimate = 1/1 = 1
+    //   pTilde = (1 + 2) / (1 + 4) = 3/5 = 0.6
+    //   variance = 0.6 * 0.4 / 5 = 0.24 / 5 = 0.048
+    //   sd = sqrt(0.048) = 0.21908902300206643...
+    const result = estimateRawScore([{ u: 1, weight: 1 }]);
+    expect(result.estimate).toBe(1);
+    expect(result.sd).toBeCloseTo(0.21908902300206643, 15);
+    // The naive Wald SE (sqrt(p(1-p)/n)) would report exactly 0 here --
+    // the whole reason for the Agresti-Coull adjustment.
+    expect(result.sd).toBeGreaterThan(0);
+  });
+
+  it("two responses with UNEQUAL weight (threshold-style): hand-computed", () => {
+    // weight 1 correct, weight 3 incorrect.
+    //   totalWeight = 4, weightedCorrect = 1*1 + 3*0 = 1, estimate = 0.25
+    //   pTilde = (1 + 2) / (4 + 4) = 3/8 = 0.375
+    //   variance = 0.375 * 0.625 / 8 = 0.234375 / 8 = 0.029296875
+    //   sd = sqrt(0.029296875) = 0.1711632992203644...
+    const result = estimateRawScore([{ u: 1, weight: 1 }, { u: 0, weight: 3 }]);
+    expect(result.estimate).toBeCloseTo(0.25, 15);
+    expect(result.sd).toBeCloseTo(0.1711632992203644, 15);
+  });
+
+  it("precision improves and estimate approaches the true rate as responses accumulate", () => {
+    const sds = [1, 5, 20, 100].map((n) => {
+      const obs = Array.from({ length: n }, (_, i) => ({ u: i % 4 === 0 ? 0 : 1, weight: 1 }));
+      return estimateRawScore(obs).sd;
+    });
+    for (let i = 1; i < sds.length; i += 1) expect(sds[i]).toBeLessThan(sds[i - 1]);
+  });
+
+  it("degrades gracefully to the familiar sqrt(p(1-p)/n) shape at large n", () => {
+    // At n = 10000 the +2/+4 pseudo-counts are negligible: p~=0.75 either way.
+    const obs = Array.from({ length: 10000 }, (_, i) => ({ u: i % 4 === 0 ? 0 : 1, weight: 1 }));
+    const result = estimateRawScore(obs);
+    const wald = Math.sqrt(0.75 * 0.25 / 10000);
+    expect(Math.abs(result.sd - wald)).toBeLessThan(1e-4);
+  });
+
+  it("returns null when total weight is zero (nothing to compute a proportion from)", () => {
+    expect(estimateRawScore([])).toBeNull();
+  });
+});
+
+describe("resolveObservationWeight — weight comes from the TASK MODEL, not the parameter set", () => {
+  it("defaults to weight 1 when the item cannot be found", () => {
+    expect(resolveObservationWeight({ itemId: "missing" }, { items: [], taskModels: [] })).toEqual({ weight: 1 });
+  });
+
+  it("defaults to weight 1 when the Task Model cannot be found", () => {
+    const db = { items: [{ id: "i1", taskModelId: "tm-missing" }], taskModels: [] };
+    expect(resolveObservationWeight({ itemId: "i1" }, db)).toEqual({ weight: 1 });
+  });
+
+  it("defaults to weight 1 when the Task Model declares no weight for this observable", () => {
+    const db = {
+      items: [{ id: "i1", taskModelId: "tm1" }],
+      taskModels: [{ id: "tm1", expectedObservations: [{ observationId: "o1" }] }],
+    };
+    expect(resolveObservationWeight({ itemId: "i1", observationId: "o1" }, db)).toEqual({ weight: 1 });
+  });
+
+  it("uses the declared weight when present", () => {
+    const db = {
+      items: [{ id: "i1", taskModelId: "tm1" }],
+      taskModels: [{ id: "tm1", expectedObservations: [{ observationId: "o1", weight: 2.5 }] }],
+    };
+    expect(resolveObservationWeight({ itemId: "i1", observationId: "o1" }, db)).toEqual({ weight: 2.5 });
+  });
+
+  it("refuses a declared weight that is zero, negative, or non-finite rather than defaulting it", () => {
+    // A zero weight would silently vanish a response with no signal that
+    // it was dropped; a negative one would invert its contribution.
+    for (const weight of [0, -1, NaN, Infinity]) {
+      const db = {
+        items: [{ id: "i1", taskModelId: "tm1" }],
+        taskModels: [{ id: "tm1", expectedObservations: [{ observationId: "o1", weight }] }],
+      };
+      expect(resolveObservationWeight({ itemId: "i1", observationId: "o1" }, db)).toEqual({ invalid: true });
+    }
+  });
+});
+
+describe("accumulateEvidence — the raw-score family end to end", () => {
+  it("a 'sum' model produces the same estimate as estimateRawScore on equally-weighted responses", () => {
+    const db = rawScoreDb({ type: "sum" });
+    const responses = [
+      makeResponse({ itemId: "i1", activated: true }),
+      makeResponse({ itemId: "i2", activated: false }),
+      makeResponse({ itemId: "i3", activated: true }),
+    ];
+    const { posteriors, warnings } = accumulateEvidence(sessionWith(responses), db);
+
+    expect(warnings).toEqual([]);
+    expect(posteriors[0].supported).toBe(true);
+    expect(posteriors[0].modelFamily).toBe("sum");
+    expect(posteriors[0].smvType).toBe("binary");
+    expect(posteriors[0].responsesUsed).toBe(3);
+
+    const expected = estimateRawScore([{ u: 1, weight: 1 }, { u: 0, weight: 1 }, { u: 1, weight: 1 }]);
+    expect(posteriors[0].estimate).toBeCloseTo(expected.estimate, 15);
+    expect(posteriors[0].precision).toBeCloseTo(expected.sd, 15);
+  });
+
+  it("a 'threshold' model honours the Task Model's declared per-observable weights", () => {
+    const items = [
+      { id: "i1", taskModelId: "tm1" },
+      { id: "i2", taskModelId: "tm1" },
+    ];
+    const taskModels = [{
+      id: "tm1",
+      expectedObservations: [
+        { observationId: "o-easy", weight: 1 },
+        { observationId: "o-hard", weight: 3 },
+      ],
+    }];
+    const db = rawScoreDb({ type: "threshold", items, taskModels });
+    const responses = [
+      makeResponse({ itemId: "i1", observationId: "o-easy", observableId: "o1", activated: true }),
+      makeResponse({ itemId: "i2", observationId: "o-hard", observableId: "o1", activated: false }),
+    ];
+
+    const { posteriors } = accumulateEvidence(sessionWith(responses), db);
+
+    expect(posteriors[0].supported).toBe(true);
+    // Same numbers as the hand-computed weight-1/weight-3 fixture above.
+    expect(posteriors[0].estimate).toBeCloseTo(0.25, 15);
+    expect(posteriors[0].precision).toBeCloseTo(0.1711632992203644, 15);
+  });
+
+  it("excludes a response whose declared weight is invalid, with a warning", () => {
+    const items = [{ id: "i1", taskModelId: "tm1" }];
+    const taskModels = [{ id: "tm1", expectedObservations: [{ observationId: "o1", weight: -1 }] }];
+    const db = rawScoreDb({ type: "threshold", items, taskModels });
+
+    const { posteriors, warnings } = accumulateEvidence(
+      sessionWith([makeResponse({ itemId: "i1", activated: true })]),
+      db
+    );
+
+    expect(posteriors[0].supported).toBe(false);
+    expect(warnings.some((w) => w.includes("invalid weight"))).toBe(true);
+  });
+
+  it("a 'ctt' model accepts a continuous, binary, or ordinal SMV but not categorical", () => {
+    for (const type of ["continuous", "binary", "ordinal"]) {
+      const db = rawScoreDb({ type: "ctt", smv: { id: "smv1", type } });
+      const { posteriors } = accumulateEvidence(sessionWith([makeResponse()]), db);
+      expect(posteriors[0].supported).toBe(true);
+      expect(posteriors[0].smvType).toBe(type);
+    }
+
+    const categoricalDb = rawScoreDb({ type: "ctt", smv: { id: "smv1", type: "categorical", states: ["a", "b"] } });
+    const { posteriors } = accumulateEvidence(sessionWith([makeResponse()]), categoricalDb);
+    expect(posteriors[0].supported).toBe(false);
+    expect(posteriors[0].reason).toMatch(/no continuous\/binary\/ordinal/);
+  });
+
+  it("refuses when several eligible SMVs exist and none is bound", () => {
+    const db = rawScoreDb({ type: "sum" });
+    db.competencyModels[0].smVariables = [binarySmv({ id: "a" }), binarySmv({ id: "b" })];
+    const { posteriors } = accumulateEvidence(sessionWith([makeResponse()]), db);
+    expect(posteriors[0].supported).toBe(false);
+    expect(posteriors[0].reason).toMatch(/Refusing to guess/);
+  });
+
+  it("honours an explicit smvId binding to a binary SMV", () => {
+    const db = rawScoreDb({ type: "sum" });
+    db.competencyModels[0].smVariables = [binarySmv({ id: "target" }), binarySmv({ id: "other" })];
+    db.evidenceModels[0].statisticalModels[0].structureConfig = { smvId: "target" };
+    const { posteriors } = accumulateEvidence(sessionWith([makeResponse()]), db);
+    expect(posteriors[0].supported).toBe(true);
+    expect(posteriors[0].smvId).toBe("target");
+  });
+
+  it("moves the estimate up on a correct response and down on an incorrect one, like the continuous branch", () => {
+    const db = rawScoreDb({ type: "sum" });
+    const up = accumulateEvidence(sessionWith([makeResponse({ activated: true })]), db);
+    const down = accumulateEvidence(sessionWith([makeResponse({ activated: false })]), db);
+    expect(up.posteriors[0].estimate).toBeGreaterThan(down.posteriors[0].estimate);
+  });
+});

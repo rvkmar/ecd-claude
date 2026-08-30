@@ -48,6 +48,16 @@ import { SM_VARIABLE_TYPE_VALUES } from "../../src/utils/ecdVocabulary.js";
    result -- see the dispatch table at the bottom of this file. */
 const CONTINUOUS_MODEL_FAMILIES = ["irt", "rasch"];
 
+/* CTT / sum / threshold: a (possibly weighted) raw/observed score rather
+   than a posterior over a latent trait. schema.js treats these three as
+   one family for decision-rule purposes ("Raw score models cannot use
+   posterior_threshold") and permits them on any ORDERED Student Model
+   Variable -- continuous, binary or ordinal, but never categorical, since
+   a total presupposes that more evidence means further along the
+   construct, which is meaningless for an unordered set of states. */
+const RAW_SCORE_MODEL_FAMILIES = ["ctt", "sum", "threshold"];
+const RAW_SCORE_SMV_TYPES = ["continuous", "binary", "ordinal"];
+
 /* QUADRATURE GRID SIZING -- Day 31, hardened after an adversarial pass.
 
    The obvious implementation (a fixed 41 points over a fixed [-4, 4]) is
@@ -452,6 +462,78 @@ function scoreResponse(response) {
 }
 
 /**
+ * The weight a response's observable contributes to a CTT/sum/threshold
+ * total, taken from the TASK MODEL that authored the item
+ * (`expectedObservations[].weight`) -- NOT from the statistical model's
+ * parameterSet, which for a raw-score family carries no per-observable
+ * parameters at all; the arithmetic here needs nothing calibrated.
+ *
+ * A response whose item, Task Model, or matching expectedObservations
+ * entry cannot be found -- or whose entry simply omits `weight` -- defaults
+ * to 1, an ordinary EQUAL contribution. That is not the same kind of
+ * default as an IRT parameter: there is no sane default shape for an item
+ * response FUNCTION, but "count this response the same as any other" is
+ * the literal definition of an unweighted sum, and is required behaviour
+ * for a "sum" model (schema.js enforces uniform weights there) rather than
+ * a fallback for missing data. A weight that IS declared but is zero,
+ * negative or non-finite is a real authoring defect -- a zero weight would
+ * silently vanish a response with no signal that it was dropped, and a
+ * negative one would invert its contribution -- so that response is
+ * excluded and warned about instead, mirroring itemParametersAreUsable.
+ */
+function resolveObservationWeight(response, db) {
+  const item = (db.items || []).find((i) => i.id === response.itemId);
+  if (!item) return { weight: 1 };
+
+  const taskModel = (db.taskModels || []).find((tm) => tm.id === item.taskModelId);
+  if (!taskModel) return { weight: 1 };
+
+  const entry = (taskModel.expectedObservations || []).find(
+    (eo) => eo.observationId === response.observationId
+  );
+  if (!entry || entry.weight === undefined) return { weight: 1 };
+
+  if (!(Number.isFinite(entry.weight) && entry.weight > 0)) return { invalid: true };
+
+  return { weight: entry.weight };
+}
+
+/**
+ * CTT / sum / threshold: a weighted proportion-correct score (0 to 1),
+ * with an Agresti-Coull-adjusted standard error rather than the textbook
+ * Wald SE = sqrt(p(1-p)/n).
+ *
+ * The Wald SE is EXACTLY ZERO whenever every response so far agrees --
+ * all correct or all incorrect -- regardless of how few responses that is,
+ * because p(1-p) is 0 at p=0 or p=1. Reporting a standard error of 0 after
+ * a single correct response would be a confidently wrong number of
+ * exactly the kind this whole file exists to prevent: a student who has
+ * answered one easy item correctly is not measured to infinite precision.
+ * Agresti & Coull's fix (1998) -- add two pseudo-successes and two
+ * pseudo-failures before computing the variance, while still reporting the
+ * unadjusted observed proportion as the point estimate -- is the standard
+ * textbook remedy for exactly this failure mode, not an invented
+ * correction; it degrades gracefully to the familiar sqrt(p(1-p)/n) shape
+ * as the effective sample size grows.
+ */
+function estimateRawScore(scoredObservations) {
+  const totalWeight = scoredObservations.reduce((acc, o) => acc + o.weight, 0);
+  if (!(totalWeight > 0)) return null;
+
+  const weightedCorrect = scoredObservations.reduce((acc, o) => acc + o.weight * o.u, 0);
+  const estimate = weightedCorrect / totalWeight;
+
+  const nEff = totalWeight;
+  const pTilde = (weightedCorrect + 2) / (nEff + 4);
+  const variance = (pTilde * (1 - pTilde)) / (nEff + 4);
+  const sd = Math.sqrt(Math.max(variance, 0));
+
+  if (!Number.isFinite(estimate) || !Number.isFinite(sd)) return null;
+
+  return { estimate, sd };
+}
+
+/**
  * EAP (expected a posteriori) estimate of a continuous SMV, with its
  * posterior standard deviation as the precision.
  *
@@ -634,10 +716,10 @@ export function accumulateEvidence(session, db, options = {}) {
 
     const family = statisticalModel.type;
 
-    if (!CONTINUOUS_MODEL_FAMILIES.includes(family)) {
-      /* The per-family dispatch the build reference calls for. DINA/G-DINA
-         attribute-mastery updating and CTT/sum/threshold aggregation are
-         Week 8; until they exist, saying so is the only honest output. */
+    if (!CONTINUOUS_MODEL_FAMILIES.includes(family) && !RAW_SCORE_MODEL_FAMILIES.includes(family)) {
+      /* The per-family dispatch the build reference calls for. Bayesian-
+         network and DINA/G-DINA attribute-mastery updating are Week 8;
+         until they exist, saying so is the only honest output. */
       posteriors.push({
         evidenceModelId,
         parameterSetId,
@@ -645,6 +727,13 @@ export function accumulateEvidence(session, db, options = {}) {
         supported: false,
         reason: `Accumulation for the '${family}' model family is not implemented yet; no estimate is produced.`,
       });
+      continue;
+    }
+
+    if (RAW_SCORE_MODEL_FAMILIES.includes(family)) {
+      posteriors.push(
+        accumulateRawScoreFamily({ evidenceModelId, parameterSetId, family, evidenceModel, statisticalModel, group, db, warnings })
+      );
       continue;
     }
 
@@ -656,7 +745,7 @@ export function accumulateEvidence(session, db, options = {}) {
        observable -> SMV binding (that is Day 34). Until it does, the only
        case that can be resolved WITHOUT GUESSING is a competency model
        carrying exactly one continuous SMV. Anything else is refused. */
-    const smvResolution = resolveContinuousSmVariable(evidenceModel, statisticalModel, db);
+    const smvResolution = resolveSmVariable(evidenceModel, statisticalModel, db, ["continuous"]);
 
     if (!smvResolution.smVariable) {
       posteriors.push({
@@ -771,13 +860,15 @@ export function accumulateEvidence(session, db, options = {}) {
 }
 
 /**
- * Day 31 scope: resolve the SMV a continuous statistical model updates,
- * WITHOUT guessing. An explicit binding is honoured if one is present
- * (forward-compatible with Day 34, which makes that binding a real,
- * validated field); otherwise the only unambiguous case is a competency
- * model with exactly one continuous SMV.
+ * Day 31 scope: resolve the SMV a statistical model updates, WITHOUT
+ * guessing. An explicit binding is honoured if one is present (forward-
+ * compatible with Day 34, which makes that binding a real, validated
+ * field); otherwise the only unambiguous case is a competency model with
+ * exactly one SMV whose type is in `allowedTypes` -- `["continuous"]` for
+ * IRT/Rasch, or the three ORDERED types for CTT/sum/threshold (see
+ * RAW_SCORE_SMV_TYPES).
  */
-function resolveContinuousSmVariable(evidenceModel, statisticalModel, db) {
+function resolveSmVariable(evidenceModel, statisticalModel, db, allowedTypes) {
   const competency = (db.competencies || []).find((c) => c.id === evidenceModel.competencyId);
 
   if (!competency) {
@@ -796,6 +887,7 @@ function resolveContinuousSmVariable(evidenceModel, statisticalModel, db) {
     return { reason: `Competency model '${competencyModel.id}' declares no smVariables, so there is nothing to accumulate into.` };
   }
 
+  const typeList = allowedTypes.join("/");
   const declaredId = statisticalModel.structureConfig?.smvId;
 
   if (declaredId) {
@@ -803,22 +895,103 @@ function resolveContinuousSmVariable(evidenceModel, statisticalModel, db) {
     if (!bound) {
       return { reason: `Statistical model '${statisticalModel.id}' declares smvId '${declaredId}', which competency model '${competencyModel.id}' does not define.` };
     }
-    if (bound.type !== "continuous") {
-      return { reason: `Statistical model '${statisticalModel.id}' is a continuous family but is bound to '${bound.id}', a '${bound.type}' Student Model Variable.` };
+    if (!allowedTypes.includes(bound.type)) {
+      return { reason: `Statistical model '${statisticalModel.id}' is a '${statisticalModel.type}' family but is bound to '${bound.id}', a '${bound.type}' Student Model Variable (expected one of: ${typeList}).` };
     }
     return { smVariable: bound };
   }
 
-  const continuous = smVariables.filter((smv) => smv.type === "continuous");
+  const candidates = smVariables.filter((smv) => allowedTypes.includes(smv.type));
 
-  if (continuous.length === 1) return { smVariable: continuous[0] };
+  if (candidates.length === 1) return { smVariable: candidates[0] };
 
-  if (continuous.length === 0) {
-    return { reason: `Competency model '${competencyModel.id}' declares no continuous Student Model Variable for a '${statisticalModel.type}' model to update.` };
+  if (candidates.length === 0) {
+    return { reason: `Competency model '${competencyModel.id}' declares no ${typeList} Student Model Variable for a '${statisticalModel.type}' model to update.` };
   }
 
   return {
-    reason: `Competency model '${competencyModel.id}' declares ${continuous.length} continuous Student Model Variables and statistical model '${statisticalModel.id}' does not say which it updates (structureConfig.smvId). Refusing to guess.`,
+    reason: `Competency model '${competencyModel.id}' declares ${candidates.length} ${typeList} Student Model Variables and statistical model '${statisticalModel.id}' does not say which it updates (structureConfig.smvId). Refusing to guess.`,
+  };
+}
+
+/**
+ * The CTT/sum/threshold counterpart of the continuous branch inline in
+ * accumulateEvidence. Pulled into its own function because it shares the
+ * response-scoring and SMV-resolution conventions but not the quadrature
+ * grid machinery -- there is no prior distribution or likelihood surface
+ * here, only a (possibly weighted) observed proportion.
+ */
+function accumulateRawScoreFamily({ evidenceModelId, parameterSetId, family, evidenceModel, statisticalModel, group, db, warnings }) {
+  const smvResolution = resolveSmVariable(evidenceModel, statisticalModel, db, RAW_SCORE_SMV_TYPES);
+
+  if (!smvResolution.smVariable) {
+    return { evidenceModelId, parameterSetId, modelFamily: family, supported: false, reason: smvResolution.reason };
+  }
+
+  const smVariable = smvResolution.smVariable;
+
+  const scoredObservations = [];
+  let excluded = 0;
+
+  for (const r of group) {
+    const { u, reason } = scoreResponse(r);
+
+    if (u === null) {
+      excluded += 1;
+      if (reason === "unknown-direction") {
+        warnings.push(`Response for item '${r.itemId}' has no usable evidence-rule direction ('${r.direction}') and was excluded.`);
+      }
+      continue;
+    }
+
+    const { weight, invalid } = resolveObservationWeight(r, db);
+
+    if (invalid) {
+      excluded += 1;
+      warnings.push(`Task Model for item '${r.itemId}' declares a non-positive or invalid weight for observable '${r.observableId}'; that response was excluded.`);
+      continue;
+    }
+
+    scoredObservations.push({ u, weight, observableId: r.observableId, itemId: r.itemId });
+  }
+
+  if (scoredObservations.length === 0) {
+    return {
+      evidenceModelId,
+      parameterSetId,
+      modelFamily: family,
+      smvId: smVariable.id,
+      supported: false,
+      reason: `No response for evidence model '${evidenceModelId}' carried usable directional evidence; the prior is unchanged, so no posterior is reported.`,
+    };
+  }
+
+  const result = estimateRawScore(scoredObservations);
+
+  if (!result) {
+    return {
+      evidenceModelId,
+      parameterSetId,
+      modelFamily: family,
+      smvId: smVariable.id,
+      supported: false,
+      reason: "The raw score could not be computed (total observable weight was zero).",
+    };
+  }
+
+  return {
+    smvId: smVariable.id,
+    smvType: smVariable.type,
+    evidenceModelId,
+    parameterSetId,
+    modelFamily: family,
+    method: "weighted-proportion",
+    supported: true,
+    estimate: result.estimate,
+    precision: result.sd,
+    sem: result.sd,
+    responsesUsed: scoredObservations.length,
+    responsesExcluded: excluded,
   };
 }
 
@@ -833,6 +1006,10 @@ export const __testing__ = {
   estimateContinuousPosterior,
   estimateWithAdaptiveGrid,
   normalDensity,
+  resolveObservationWeight,
+  estimateRawScore,
   CONTINUOUS_MODEL_FAMILIES,
+  RAW_SCORE_MODEL_FAMILIES,
+  RAW_SCORE_SMV_TYPES,
   SM_VARIABLE_TYPE_VALUES,
 };
