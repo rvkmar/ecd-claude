@@ -759,6 +759,7 @@ export function accumulateEvidence(session, db, options = {}) {
     }
 
     const smVariable = smvResolution.smVariable;
+    const competencyModelId = smvResolution.competencyModelId;
     const quadrature = buildQuadrature(smVariable, options);
 
     if (!quadrature) {
@@ -767,6 +768,7 @@ export function accumulateEvidence(session, db, options = {}) {
         parameterSetId,
         modelFamily: family,
         smvId: smVariable.id,
+        competencyModelId,
         supported: false,
         reason: `Student Model Variable '${smVariable.id}' has no prior distribution this module can build a continuous quadrature grid from (family '${smVariable.priorDistribution?.family}').`,
       });
@@ -811,6 +813,7 @@ export function accumulateEvidence(session, db, options = {}) {
         parameterSetId,
         modelFamily: family,
         smvId: smVariable.id,
+        competencyModelId,
         supported: false,
         reason: `No response for evidence model '${evidenceModelId}' carried usable directional evidence; the prior is unchanged, so no posterior is reported.`,
       });
@@ -825,6 +828,7 @@ export function accumulateEvidence(session, db, options = {}) {
         parameterSetId,
         modelFamily: family,
         smvId: smVariable.id,
+        competencyModelId,
         supported: false,
         reason: "The posterior could not be normalised (no quadrature node carried usable probability mass).",
       });
@@ -837,6 +841,7 @@ export function accumulateEvidence(session, db, options = {}) {
       evidenceModelId,
       parameterSetId,
       modelFamily: family,
+      competencyModelId,
       method: "eap",
       supported: true,
       estimate: result.estimate,
@@ -952,12 +957,12 @@ function resolveSmVariable(evidenceModel, statisticalModel, db, allowedTypes) {
     if (!allowedTypes.includes(bound.type)) {
       return { reason: `Statistical model '${statisticalModel.id}' is a '${statisticalModel.type}' family but is bound to '${bound.id}', a '${bound.type}' Student Model Variable (expected one of: ${typeList}).` };
     }
-    return { smVariable: bound };
+    return { smVariable: bound, competencyModelId: competencyModel.id };
   }
 
   const candidates = smVariables.filter((smv) => allowedTypes.includes(smv.type));
 
-  if (candidates.length === 1) return { smVariable: candidates[0] };
+  if (candidates.length === 1) return { smVariable: candidates[0], competencyModelId: competencyModel.id };
 
   if (candidates.length === 0) {
     return { reason: `Competency model '${competencyModel.id}' declares no ${typeList} Student Model Variable for a '${statisticalModel.type}' model to update.` };
@@ -983,6 +988,7 @@ function accumulateRawScoreFamily({ evidenceModelId, parameterSetId, family, evi
   }
 
   const smVariable = smvResolution.smVariable;
+  const competencyModelId = smvResolution.competencyModelId;
 
   const scoredObservations = [];
   let excluded = 0;
@@ -1015,6 +1021,7 @@ function accumulateRawScoreFamily({ evidenceModelId, parameterSetId, family, evi
       parameterSetId,
       modelFamily: family,
       smvId: smVariable.id,
+      competencyModelId,
       supported: false,
       reason: `No response for evidence model '${evidenceModelId}' carried usable directional evidence; the prior is unchanged, so no posterior is reported.`,
     };
@@ -1028,6 +1035,7 @@ function accumulateRawScoreFamily({ evidenceModelId, parameterSetId, family, evi
       parameterSetId,
       modelFamily: family,
       smvId: smVariable.id,
+      competencyModelId,
       supported: false,
       reason: "The raw score could not be computed (total observable weight was zero).",
     };
@@ -1039,6 +1047,7 @@ function accumulateRawScoreFamily({ evidenceModelId, parameterSetId, family, evi
     evidenceModelId,
     parameterSetId,
     modelFamily: family,
+    competencyModelId,
     method: "weighted-proportion",
     supported: true,
     estimate: result.estimate,
