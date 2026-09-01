@@ -113,4 +113,34 @@ describe("resolveAssemblyProgress", () => {
     expect(resolveAssemblyProgress([], {})).toEqual([]);
     expect(resolveAssemblyProgress(undefined, { assemblyModels: [] })).toEqual([]);
   });
+
+  it("refuses to compare a requiredSEM target against a non-continuous posterior's precision", () => {
+    const result = resolveAssemblyProgress(
+      [posterior({ smvType: "binary", precision: 0.1 })],
+      { assemblyModels: [assemblyModel()] }
+    );
+    expect(result).toEqual([{
+      smvId: "smv1",
+      assemblyModelId: "am1",
+      estimate: 0.5,
+      precision: 0.1,
+      requiredSEM: 0.4,
+      stoppingCriterionMet: null,
+      note: "A requiredSEM target is defined on the theta scale and cannot be compared to a 'binary' Student Model Variable's precision.",
+    }]);
+  });
+
+  it("still evaluates a requiredSEM target normally when smvType is 'continuous' or absent", () => {
+    const withType = resolveAssemblyProgress(
+      [posterior({ smvType: "continuous", precision: 0.3 })],
+      { assemblyModels: [assemblyModel()] }
+    );
+    expect(withType[0].stoppingCriterionMet).toBe(true);
+
+    const withoutType = resolveAssemblyProgress(
+      [posterior({ precision: 0.3 })],
+      { assemblyModels: [assemblyModel()] }
+    );
+    expect(withoutType[0].stoppingCriterionMet).toBe(true);
+  });
 });
