@@ -53,7 +53,21 @@ export function resolveAssemblyProgress(posteriors, db) {
       precision: posterior.precision,
     };
 
-    if (Number.isFinite(target.requiredSEM)) {
+    /* A SEM target is only comparable to a precision on the SAME scale.
+       The continuous branch reports a posterior SD in theta units; the
+       attribute-mastery branch reports sqrt(p(1-p)), which is bounded by
+       0.5 and means something entirely different. Comparing the two would
+       mark an attribute "measured precisely enough" purely because a
+       probability's SD cannot exceed 0.5 -- schema.js already forbids
+       authoring requiredSEM on a non-continuous SMV, so this is a
+       defence against a record whose SMV type changed after the Assembly
+       Model was written (`update` does not revalidate), not a routine
+       path. Flagged by the Day 36 adversarial review. */
+    if (Number.isFinite(target.requiredSEM) && posterior.smvType && posterior.smvType !== "continuous") {
+      entry.requiredSEM = target.requiredSEM;
+      entry.stoppingCriterionMet = null;
+      entry.note = `A requiredSEM target is defined on the theta scale and cannot be compared to a '${posterior.smvType}' Student Model Variable's precision.`;
+    } else if (Number.isFinite(target.requiredSEM)) {
       entry.requiredSEM = target.requiredSEM;
       entry.stoppingCriterionMet = posterior.precision <= target.requiredSEM;
     } else if (Number.isFinite(target.requiredClassificationAccuracy)) {
