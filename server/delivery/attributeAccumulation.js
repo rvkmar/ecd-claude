@@ -1,0 +1,707 @@
+// server/delivery/attributeAccumulation.js
+//
+// Day 36 (Week 8): the binary-attribute-mastery branch of Evidence
+// Accumulation -- DINA and G-DINA. Where the continuous branch
+// (evidenceAccumulation.js) updates ONE latent ability from an item
+// response function over theta, this updates a JOINT distribution over
+// 2^K attribute-mastery profiles and reports the marginal mastery
+// probability of each attribute separately.
+//
+// The near-term DINA requirement (build reference Part 0.3) is why
+// Evidence Accumulation had to dispatch per model family from its first
+// line rather than being written for IRT and generalised later. This file
+// is what that dispatch was reserved for.
+//
+// It carries the same standard the continuous branch was held to, for the
+// same reason: a mastery probability of 0.83 looks exactly as credible
+// whether the math is right or wrong. Every case that cannot be computed
+// correctly returns an explicit refusal rather than a number.
+//
+// FIVE DECISIONS WORTH READING BEFORE CHANGING ANYTHING HERE
+//
+// 1. PARAMETERS ARE KEYED BY ITEM, NOT BY OBSERVABLE. This diverges from
+//    the IRT branch, deliberately. A Q-matrix is an items x attributes
+//    matrix -- `qMatrixModels.entries[]` is `{itemId, attributeId}` (Day
+//    18), so an item's Q-vector is item-scoped by construction. The DINA
+//    response function P(X=1 | alpha) is a function of BOTH the Q-vector
+//    and (slip, guess) together, so those parameters must live at the same
+//    granularity as the Q-vector or the two can disagree. Two items
+//    sharing one observable have different Q-vectors and therefore need
+//    different slip/guess; keying them by observable would silently force
+//    them to share. This also matches the DINA literature, where s_j and
+//    g_j are per-item throughout.
+//
+// 2. THE PRIOR ASSUMES ATTRIBUTE INDEPENDENCE; THE POSTERIOR DOES NOT.
+//    Competency models declare a prior per binary SMV, one at a time --
+//    there is nowhere to author a joint distribution over profiles, and
+//    inventing correlations that nobody stated would be a fabrication. So
+//    the prior is the product of the marginals. The POSTERIOR is computed
+//    over all 2^K profiles jointly and only then marginalised, so the
+//    dependence the data induces between attributes is preserved. This is
+//    the standard independence-prior starting point, and it is an
+//    assumption, not a derivation -- it is stated here because it is
+//    invisible in the output.
+//
+// 3. A ZERO PROBABILITY IS NOT CLAMPED, unlike the continuous branch.
+//    There, log(0) arose from a logistic function SATURATING in floating
+//    point, so clamping recovered the intended value. Here, P(X=1 | alpha)
+//    = 0 is an exact modelling statement: with guess = 0, a student
+//    lacking the required attributes cannot answer correctly, so observing
+//    a correct answer genuinely rules those profiles out. Clamping would
+//    silently soften a deterministic constraint the author wrote on
+//    purpose. If the data rules out EVERY profile -- which is possible,
+//    and means the responses are impossible under the calibrated model --
+//    that is refused explicitly rather than normalised into noise.
+//
+// 4. DINA MONOTONICITY IS ENFORCED; G-DINA MONOTONICITY IS NOT. DINA
+//    requires guess < 1 - slip: a student who has every required attribute
+//    must be likelier to succeed than one who has none. Violating it
+//    inverts the item, exactly as a negative IRT discrimination did (a
+//    defect the Day 31 adversarial review caught reporting theta = -2.21
+//    for twenty CORRECT answers). A SATURATED G-DINA is a different
+//    matter -- non-monotonic estimates are legitimate output there and
+//    the package that produced them did not treat them as errors -- so
+//    those are surfaced as a warning, not a refusal.
+//
+// 5. THE REDUCED-PATTERN ORDERING IS LITTLE-ENDIAN, and it matters more
+//    than it looks. See REDUCED_PATTERN_ORDER below.
+
+/* Cost bound, not a modelling claim -- mirrors MAX_GRID_POINTS in the
+   continuous branch. The posterior is computed over all 2^K profiles, so
+   the work doubles per attribute: K=12 is 4,096 profiles per response,
+   K=20 would be a million. A Q-matrix wider than this is refused with a
+   reason rather than silently hanging a request. */
+const MAX_ATTRIBUTES = 12;
+
+/* The canonical index of an item's REDUCED attribute pattern -- the
+   sub-vector of only the attributes that item requires -- used to look up
+   a saturated G-DINA probability.
+
+   Getting this backwards does not throw. It permutes the probability
+   table, so a well-calibrated item quietly answers with another pattern's
+   probability, and every posterior downstream is plausible and wrong.
+   The convention here: attributes appear in the order the Q-matrix's own
+   `attributeIds[]` declares them (the one stable authored ordering), and
+   the FIRST required attribute is the LEAST significant bit -- so for a
+   two-attribute item the table is ordered [00, 10, 01, 11]. That matches
+   the GDINA R package's `attributepattern()` layout, which Day 37's
+   sim10GDINA benchmark will compare against directly.
+
+   *** UNRESOLVED, AND THE HIGHEST-VALUE THING FOR DAY 37 TO SETTLE. ***
+
+   The convention below is verified INTERNALLY consistent -- enumerate-
+   Profiles and reducedPatternIndex agree for k=1..6, and the module's own
+   tests check it -- but nothing here validates it against the EXTERNAL
+   package, because R is not installed in this environment and GDINA is not
+   vendored. Every test in the suite checks this module against its own
+   stated convention.
+
+   A Day 36 adversarial review raised a specific competing hypothesis
+   worth recording rather than losing: that `GDINA:::alpha()` builds
+   column i as `rep(c(0, 1), each = 2^(K - i))`, which would make the
+   FIRST attribute the MOST significant bit -- big-endian, the opposite of
+   what is implemented here. The reviewer was explicit that this was
+   recollection, not verification, and could not check it either.
+
+   If that recollection is right, every saturated G-DINA probability table
+   imported into this system is permuted. Day 37's sim10GDINA benchmark
+   must settle it EMPIRICALLY before any real Q-matrix is authored. If it
+   disagrees, this constant and reducedPatternIndex() below are the only
+   two places that change -- DINA is unaffected either way, since eta is a
+   conjunction and so order-free. */
+const REDUCED_PATTERN_ORDER = "little-endian";
+
+/**
+ * Every binary profile over `k` attributes, as arrays of 0/1.
+ * Profile index is itself little-endian over the FULL attribute list, for
+ * the same reason as REDUCED_PATTERN_ORDER -- one convention, used twice.
+ */
+function enumerateProfiles(k) {
+  const total = 2 ** k;
+  const profiles = new Array(total);
+
+  for (let p = 0; p < total; p += 1) {
+    const profile = new Array(k);
+    for (let a = 0; a < k; a += 1) {
+      profile[a] = (p >> a) & 1;
+    }
+    profiles[p] = profile;
+  }
+
+  return profiles;
+}
+
+/**
+ * The index of a profile's reduced pattern over `requiredIndices` -- the
+ * positions (into the full attribute list) that this item requires.
+ * See REDUCED_PATTERN_ORDER.
+ */
+function reducedPatternIndex(profile, requiredIndices) {
+  let index = 0;
+  for (let i = 0; i < requiredIndices.length; i += 1) {
+    if (profile[requiredIndices[i]] === 1) index += 1 << i;
+  }
+  return index;
+}
+
+/**
+ * The prior probability that a single binary attribute is mastered.
+ *
+ * `bernoulli` states it directly. `beta` states a distribution OVER that
+ * probability, whose mean alpha/(alpha+beta) is exactly the marginal
+ * mastery probability implied for one student -- a reduction, but the
+ * mathematically correct one, not a convenience.
+ *
+ * An ABSENT priorDistribution defaults to 0.5 -- maximum entropy, the
+ * honest "no information stated" prior for a binary attribute, and the
+ * usual DINA default. A prior that is PRESENT but degenerate is refused
+ * instead of defaulted, matching the continuous branch's treatment of a
+ * declared-but-invalid standard deviation: substituting a default there
+ * would report a posterior against a prior the author never wrote.
+ */
+function masteryPrior(smVariable) {
+  const prior = smVariable?.priorDistribution;
+
+  // Absent entirely -- the documented default.
+  if (!prior) return { p: 0.5 };
+
+  /* Present but with no family named. This used to fall into the default
+     above, which is the one case the rule was written to exclude: a
+     priorDistribution of `{ params: { p: 0.05 } }` (a typo, or a record
+     predating the family field) silently became p = 0.5, reporting a
+     posterior against a prior nobody wrote and burying the author's own
+     stated 0.05. */
+  if (!prior.family) {
+    return { reason: `Student Model Variable '${smVariable.id}' declares a priorDistribution with no family; it cannot be read as a distribution over a binary attribute.` };
+  }
+
+  const params = prior.params || {};
+
+  if (prior.family === "bernoulli") {
+    if (!(Number.isFinite(params.p) && params.p >= 0 && params.p <= 1)) {
+      return { reason: `Student Model Variable '${smVariable.id}' declares a bernoulli prior with an invalid p ('${params.p}'); p must be between 0 and 1.` };
+    }
+    return { p: params.p };
+  }
+
+  if (prior.family === "beta") {
+    const { alpha, beta } = params;
+    if (!(Number.isFinite(alpha) && alpha > 0 && Number.isFinite(beta) && beta > 0)) {
+      return { reason: `Student Model Variable '${smVariable.id}' declares a beta prior with invalid parameters (alpha '${alpha}', beta '${beta}'); both must be positive.` };
+    }
+    return { p: alpha / (alpha + beta) };
+  }
+
+  return { reason: `Student Model Variable '${smVariable.id}' declares a '${prior.family}' prior, which is not a distribution over a binary attribute (expected bernoulli or beta).` };
+}
+
+/**
+ * Is this a usable DINA parameter pair?
+ *
+ * See decision 4 in the header for why monotonicity is a refusal here.
+ * `slip` is the probability a master answers incorrectly; `guess` the
+ * probability a non-master answers correctly.
+ */
+function dinaParametersAreUsable(params) {
+  if (!params || typeof params !== "object") return false;
+  const { slip, guess } = params;
+  if (!(Number.isFinite(slip) && slip >= 0 && slip < 1)) return false;
+  if (!(Number.isFinite(guess) && guess >= 0 && guess < 1)) return false;
+  // Monotonicity: P(correct | mastered) > P(correct | not mastered).
+  if (!(guess < 1 - slip)) return false;
+  return true;
+}
+
+/**
+ * Validate a saturated G-DINA probability table against the number of
+ * attributes the item actually requires.
+ *
+ * A table of the wrong LENGTH is the failure mode worth catching loudest:
+ * it means the item's Q-vector and its calibrated parameters disagree
+ * about which attributes the item measures, and any index into it is then
+ * meaningless. Refused, never truncated or padded.
+ */
+function gdinaParametersAreUsable(params, requiredCount) {
+  if (!params || typeof params !== "object") return false;
+  const { probabilities } = params;
+  if (!Array.isArray(probabilities)) return false;
+  if (probabilities.length !== 2 ** requiredCount) return false;
+  return probabilities.every((p) => Number.isFinite(p) && p >= 0 && p <= 1);
+}
+
+/**
+ * Is a saturated G-DINA table monotonic -- does mastering an ADDITIONAL
+ * required attribute never reduce the probability of success?
+ *
+ * Not a refusal (decision 4), but worth surfacing: a non-monotonic
+ * estimate usually means a small calibration sample or a misspecified
+ * Q-vector, and it is invisible in the posterior it produces.
+ */
+function gdinaTableIsMonotonic(probabilities, requiredCount) {
+  for (let pattern = 0; pattern < probabilities.length; pattern += 1) {
+    for (let bit = 0; bit < requiredCount; bit += 1) {
+      if ((pattern >> bit) & 1) continue;          // already mastered
+      const withOneMore = pattern + (1 << bit);
+      if (probabilities[withOneMore] < probabilities[pattern]) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Is the table INVERTED -- is mastering every required attribute strictly
+ * worse than mastering none?
+ *
+ * The refusable case, as distinct from the merely non-monotonic one a
+ * finite calibration sample legitimately produces. Deliberately the
+ * weakest test that still catches a sign error: it compares only the two
+ * extreme patterns, so a table that wanders in the middle but still
+ * rewards full mastery is left alone.
+ */
+function gdinaTableIsInverted(probabilities) {
+  return probabilities[probabilities.length - 1] < probabilities[0];
+}
+
+/**
+ * Is every entry identical? Such an item's response probability does not
+ * depend on the profile at all, so it separates nothing.
+ */
+function gdinaTableIsFlat(probabilities) {
+  return probabilities.every((p) => p === probabilities[0]);
+}
+
+/**
+ * The joint posterior over attribute-mastery profiles, and each
+ * attribute's marginal mastery probability.
+ *
+ * Accumulated in LOG space and re-centred on the maximum of the JOINT
+ * (prior + likelihood) before exponentiating -- the same discipline the
+ * continuous branch arrived at, and for the same reason: re-centring the
+ * likelihood alone leaves the prior as a separate exp() that can underflow
+ * to exactly zero on its own, at which point the whole posterior is 0/0.
+ * Only the joint has to be representable.
+ *
+ * @returns {{ posterior: number[], marginals: number[] } | null}
+ */
+function computeProfilePosterior(scoredResponses, attributePriors, family) {
+  const k = attributePriors.length;
+  const profiles = enumerateProfiles(k);
+
+  /* Every log() below is hoisted out of the per-profile loop.
+     The naive shape -- calling Math.log inside the 2^K x responses loop --
+     recomputed the SAME handful of logarithms 4,096 times per response and
+     cost 206ms at the K=12 cap, on a path that now runs on every submit.
+     The number of DISTINCT probabilities is tiny: K priors, and per
+     response either 2 (DINA: eta is 0 or 1) or 2^m (a saturated G-DINA
+     table over the m attributes that item requires). Precomputing them
+     into lookup tables leaves only integer work in the hot loop. */
+  const logPriorTrue = attributePriors.map((p) => Math.log(p));
+  const logPriorFalse = attributePriors.map((p) => Math.log(1 - p));
+
+  const responseLogTables = scoredResponses.map((response) => {
+    const size = family === "dina" ? 2 : 2 ** response.requiredIndices.length;
+    const table = new Array(size);
+
+    for (let pattern = 0; pattern < size; pattern += 1) {
+      const probability = family === "dina"
+        ? (pattern === 1 ? 1 - response.params.slip : response.params.guess)
+        : response.params.probabilities[pattern];
+
+      table[pattern] = response.u === 1 ? Math.log(probability) : Math.log(1 - probability);
+    }
+
+    return { table, requiredIndices: response.requiredIndices };
+  });
+
+  const logJoint = profiles.map((profile) => {
+    let total = 0;
+
+    for (let a = 0; a < k; a += 1) {
+      total += profile[a] === 1 ? logPriorTrue[a] : logPriorFalse[a];
+    }
+
+    for (const { table, requiredIndices } of responseLogTables) {
+      /* For DINA the table has two rows, so the "pattern" collapses to
+         eta -- 1 only when every required attribute is mastered. For
+         G-DINA it is the full reduced-pattern index. Both are the same
+         integer walk over requiredIndices. */
+      let index;
+
+      if (family === "dina") {
+        index = 1;
+        for (let i = 0; i < requiredIndices.length; i += 1) {
+          if (profile[requiredIndices[i]] !== 1) { index = 0; break; }
+        }
+      } else {
+        index = reducedPatternIndex(profile, requiredIndices);
+      }
+
+      total += table[index];
+    }
+
+    return total;
+  });
+
+  let maxLogJoint = -Infinity;
+  for (const value of logJoint) if (value > maxLogJoint) maxLogJoint = value;
+
+  // Every profile carries zero density. Either the priors are degenerate
+  // or -- the interesting case -- the responses are jointly impossible
+  // under the calibrated parameters (see decision 3). Both are refusals.
+  if (!Number.isFinite(maxLogJoint)) return null;
+
+  const unnormalized = logJoint.map((value) => Math.exp(value - maxLogJoint));
+  const total = unnormalized.reduce((acc, v) => acc + v, 0);
+
+  if (!(total > 0) || !Number.isFinite(total)) return null;
+
+  const posterior = unnormalized.map((v) => v / total);
+
+  // Marginalise: P(attribute a mastered) is the total mass of every
+  // profile in which it is mastered. The joint is computed first and
+  // collapsed second, precisely so the dependence between attributes that
+  // the data induced is not thrown away before it is used.
+  const marginals = new Array(k).fill(0);
+  for (let p = 0; p < profiles.length; p += 1) {
+    for (let a = 0; a < k; a += 1) {
+      if (profiles[p][a] === 1) marginals[a] += posterior[p];
+    }
+  }
+
+  if (marginals.some((m) => !Number.isFinite(m))) return null;
+
+  return { posterior, marginals };
+}
+
+/**
+ * Accumulate attribute mastery for one Evidence Model's responses.
+ *
+ * Returns an ARRAY of posterior entries -- one per Q-matrix attribute,
+ * each naming its own binary Student Model Variable. This is the shape
+ * that differs most from the continuous and raw-score branches, which
+ * each produce a single posterior: a diagnostic model's whole purpose is
+ * to report per-attribute mastery separately, so one response set updates
+ * K Student Model Variables at once.
+ */
+export function accumulateAttributeMastery({
+  evidenceModelId, parameterSetId, family, evidenceModel, statisticalModel,
+  parameterSet, group, db, warnings, scoreResponse,
+}) {
+  const refuse = (reason) => [{ evidenceModelId, parameterSetId, modelFamily: family, supported: false, reason }];
+
+  const qMatrixId = statisticalModel.structureConfig?.qMatrixId;
+
+  if (!qMatrixId) {
+    return refuse(`Statistical model '${statisticalModel.id}' is a '${family}' model but declares no structureConfig.qMatrixId; there is no Q-matrix to accumulate against.`);
+  }
+
+  const qMatrix = (db.qMatrixModels || []).find((q) => q.id === qMatrixId);
+
+  if (!qMatrix) {
+    return refuse(`Statistical model '${statisticalModel.id}' references unknown qMatrixId '${qMatrixId}'.`);
+  }
+
+  /* A Q-matrix deliberately pulled from service must not keep scoring live
+     sessions. Mirrors the item-delivery rule in sessionRoutes.js exactly:
+     a draft or reviewed Q-matrix is still deliverable (preview and test
+     delivery score correctly), but `suspended` and `archived` both mean
+     somebody withdrew it on purpose. Every other governed entity in this
+     pipeline is status-gated; this was reading by id alone. */
+  if (["suspended", "archived"].includes(qMatrix.status)) {
+    return refuse(`Q-matrix '${qMatrixId}' is '${qMatrix.status}' and cannot be used to score responses.`);
+  }
+
+  const attributeIds = qMatrix.attributeIds || [];
+
+  if (attributeIds.length === 0) {
+    return refuse(`Q-matrix '${qMatrixId}' declares no attributes, so there is nothing to accumulate into.`);
+  }
+
+  /* A duplicated attribute doubles the profile space and emits two
+     posterior rows for one Student Model Variable -- and since
+     applyPosteriorsToSession keys smvPosteriors by smvId, the second
+     silently overwrites the first, so which of two different numbers gets
+     persisted depends on array order. schema.js rejects this at insert;
+     `update` does not revalidate, so a record can still reach here. */
+  const duplicateAttribute = attributeIds.find((id, i) => attributeIds.indexOf(id) !== i);
+
+  if (duplicateAttribute) {
+    return refuse(`Q-matrix '${qMatrixId}' declares attribute '${duplicateAttribute}' more than once; the attribute list must be unique before a posterior can be reported per attribute.`);
+  }
+
+  if (attributeIds.length > MAX_ATTRIBUTES) {
+    return refuse(`Q-matrix '${qMatrixId}' declares ${attributeIds.length} attributes; this module computes a full posterior over all 2^K profiles and refuses beyond ${MAX_ATTRIBUTES} (${2 ** MAX_ATTRIBUTES} profiles) rather than exhaust the request.`);
+  }
+
+  const competencyModel = (db.competencyModels || []).find((m) => m.id === qMatrix.competencyModelId);
+
+  if (!competencyModel) {
+    return refuse(`Q-matrix '${qMatrixId}' references competency model '${qMatrix.competencyModelId}', which was not found.`);
+  }
+
+  /* The Q-matrix and the Evidence Model must be talking about the SAME
+     competency model. They are reached by two independent routes -- this
+     branch resolves one from `qMatrix.competencyModelId`, while the
+     continuous branch resolves it from
+     evidenceModel.competencyId -> competencies -> modelId -- and nothing,
+     here or in schema.js, previously compared them.
+
+     An adversarial review cross-wired an Evidence Model bound to a
+     mathematics competency model to a Q-matrix declared on a reading one,
+     and got two confident reading-attribute posteriors back with no
+     warning. That is worse than a wrong number: it files a measurement
+     under Student Model Variables the assessment never targeted, and
+     applyPosteriorsToSession keys smvPosteriors by smvId alone, so the
+     stored record carries no trace of where it came from. */
+  const competency = (db.competencies || []).find((c) => c.id === evidenceModel.competencyId);
+
+  if (competency && competency.modelId !== competencyModel.id) {
+    return refuse(`Evidence model '${evidenceModelId}' measures competency '${competency.id}' on competency model '${competency.modelId}', but its '${family}' statistical model points at Q-matrix '${qMatrixId}', which is declared on competency model '${competencyModel.id}'. Refusing to report attribute mastery against a competency model this evidence does not measure.`);
+  }
+
+  /* Resolve every attribute to its binary SMV and its prior. schema.js
+     already enforces binary-ness at authoring time; it is re-checked here
+     because this may be running against a db snapshot in which some other
+     path violated it -- the same reasoning schema.js's own DINA block
+     gives for duplicating the check. */
+  const attributes = [];
+
+  for (const attributeId of attributeIds) {
+    const smVariable = (competencyModel.smVariables || []).find((smv) => smv.id === attributeId);
+
+    if (!smVariable) {
+      return refuse(`Q-matrix '${qMatrixId}' names attribute '${attributeId}', which competency model '${competencyModel.id}' does not define.`);
+    }
+
+    if (smVariable.type !== "binary") {
+      return refuse(`Q-matrix '${qMatrixId}' names attribute '${attributeId}', a '${smVariable.type}' Student Model Variable. Attribute-mastery accumulation requires binary attributes.`);
+    }
+
+    const prior = masteryPrior(smVariable);
+    if (prior.reason) return refuse(prior.reason);
+
+    attributes.push({ smVariable, prior: prior.p });
+  }
+
+  const attributeIndexById = new Map(attributeIds.map((id, i) => [id, i]));
+
+  /* Each item's Q-vector, as indices into the attribute list.
+
+     An entry whose `required` is present and falsy is an explicitly
+     declared ZERO cell, not a required attribute -- a Q-matrix is a 0/1
+     matrix and this flag is how a 0 is written down. Tested for falsiness
+     rather than `=== false` because a numeric 0 is the natural encoding of
+     a zero cell coming out of a CSV or an R export, and `required: 0`
+     reading as "required" would invert the cell's meaning.
+
+     SORTED, and this is load-bearing rather than tidiness. The reduced-
+     pattern index (see REDUCED_PATTERN_ORDER) is defined over the
+     attributes in `attributeIds[]` order. Building it in `entries[]` order
+     instead makes the bit order depend on the sequence cells happened to
+     be authored in -- and nothing constrains that: schema.js validates an
+     entries array in any order as entirely valid, and a cell-clicking
+     Q-matrix editor produces click order by default. An adversarial review
+     measured the consequence: with the same Q-matrix authored in two entry
+     orders, two attributes' mastery probabilities were EXCHANGED (0.914 /
+     0.571 becoming 0.571 / 0.914), silently and with `supported: true`,
+     and per-attribute classification accuracy over 2,000 simulated
+     students fell from 94.9% to 90.3%. DINA is immune because eta is a
+     conjunction and so order-free, which is exactly why the DINA/G-DINA
+     equivalence test could not catch it. */
+  const requiredIndicesByItem = new Map();
+  const itemsWithUnknownAttribute = new Set();
+
+  for (const entry of qMatrix.entries || []) {
+    if (!entry?.itemId) continue;
+    if (entry.required !== undefined && !entry.required) continue;
+
+    const index = attributeIndexById.get(entry.attributeId);
+
+    /* An entry naming an attribute the Q-matrix never declared. Dropping
+       the cell silently would TRUNCATE the item's Q-vector -- scoring a
+       two-attribute item as though it required only one, which reports a
+       higher mastery probability than the evidence supports (measured:
+       0.818 where the honest answer is 0.733) and compounds across items.
+       The item is excluded below instead. */
+    if (index === undefined) {
+      itemsWithUnknownAttribute.add(entry.itemId);
+      continue;
+    }
+
+    if (!requiredIndicesByItem.has(entry.itemId)) requiredIndicesByItem.set(entry.itemId, []);
+    requiredIndicesByItem.get(entry.itemId).push(index);
+  }
+
+  for (const indices of requiredIndicesByItem.values()) indices.sort((a, b) => a - b);
+
+  const scoredResponses = [];
+  let excluded = 0;
+
+  for (const r of group) {
+    const { u, reason } = scoreResponse(r);
+
+    if (u === null) {
+      excluded += 1;
+      if (reason === "unknown-direction") {
+        warnings.push(`Response for item '${r.itemId}' has no usable evidence-rule direction ('${r.direction}') and was excluded.`);
+      }
+      continue;
+    }
+
+    if (itemsWithUnknownAttribute.has(r.itemId)) {
+      excluded += 1;
+      warnings.push(`Q-matrix '${qMatrixId}' places item '${r.itemId}' on an attribute it does not declare in attributeIds; the item's Q-vector cannot be resolved, so that response was excluded rather than scored against a truncated one.`);
+      continue;
+    }
+
+    const requiredIndices = requiredIndicesByItem.get(r.itemId);
+
+    /* An item the Q-matrix does not place requires no attributes, so its
+       response function is constant across every profile: it discriminates
+       between none of them. Including it would add a flat term that
+       changes no posterior while inflating responsesUsed -- which reads,
+       wrongly, as evidence having been gathered. */
+    if (!requiredIndices || requiredIndices.length === 0) {
+      excluded += 1;
+      warnings.push(`Q-matrix '${qMatrixId}' declares no required attributes for item '${r.itemId}'; that response carries no diagnostic information and was excluded.`);
+      continue;
+    }
+
+    // Decision 1: parameters are keyed by ITEM for this family.
+    const params = parameterSet?.parameters?.[r.itemId];
+
+    if (!params) {
+      excluded += 1;
+      warnings.push(`Parameter set '${parameterSetId}' has no ${family} parameters for item '${r.itemId}'; that response was excluded.`);
+      continue;
+    }
+
+    if (family === "dina") {
+      if (!dinaParametersAreUsable(params)) {
+        excluded += 1;
+        warnings.push(`Parameter set '${parameterSetId}' has unusable DINA parameters for item '${r.itemId}' (slip and guess must each be in [0,1) and satisfy guess < 1 - slip); that response was excluded.`);
+        continue;
+      }
+    } else if (!gdinaParametersAreUsable(params, requiredIndices.length)) {
+      excluded += 1;
+      warnings.push(`Parameter set '${parameterSetId}' has unusable G-DINA parameters for item '${r.itemId}': expected a probabilities[] of length ${2 ** requiredIndices.length} (2^${requiredIndices.length} required attributes), each in [0,1]. That response was excluded.`);
+      continue;
+    } else if (gdinaTableIsInverted(params.probabilities)) {
+      /* Not merely non-monotonic -- INVERTED: mastering every required
+         attribute makes success LESS likely than mastering none. That is
+         the G-DINA form of a negative IRT discrimination, and decision 4
+         only ever meant to tolerate the mild non-monotonicity a finite
+         calibration sample produces, not this.
+
+         Consuming it produces exactly the Day 31 defect this pipeline
+         already fixed once: an adversarial review drove twenty CORRECT
+         answers from a prior of 0.5 down to a mastery probability of
+         3.1e-34, reported as `supported: true`. The equivalence is the
+         argument -- a DINA item with slip=0.9, guess=0.9 is refused, so
+         the mathematically identical table [0.9, 0.9, 0.9, 0.1] cannot be
+         accepted without the two parameterisations of one model
+         contradicting each other. */
+      excluded += 1;
+      warnings.push(`Parameter set '${parameterSetId}' has an INVERTED G-DINA table for item '${r.itemId}': mastering every required attribute is less likely to succeed than mastering none. That response was excluded rather than allowed to drive mastery in the wrong direction.`);
+      continue;
+    } else if (gdinaTableIsFlat(params.probabilities)) {
+      /* A constant table discriminates between no profiles at all -- the
+         same situation as an item the Q-matrix never placed, which is
+         excluded a few lines above for the same stated reason: counting it
+         inflates responsesUsed, which reads as evidence having been
+         gathered. */
+      excluded += 1;
+      warnings.push(`Parameter set '${parameterSetId}' has a constant G-DINA table for item '${r.itemId}' (every attribute pattern has the same success probability); that response carries no diagnostic information and was excluded.`);
+      continue;
+    } else if (!gdinaTableIsMonotonic(params.probabilities, requiredIndices.length)) {
+      warnings.push(`Parameter set '${parameterSetId}' has a non-monotonic G-DINA table for item '${r.itemId}': mastering a further required attribute lowers the probability of success. The response was still used, but the calibration is worth reviewing.`);
+    }
+
+    scoredResponses.push({ u, params, requiredIndices, itemId: r.itemId });
+  }
+
+  const common = {
+    evidenceModelId,
+    parameterSetId,
+    modelFamily: family,
+    competencyModelId: competencyModel.id,
+  };
+
+  if (scoredResponses.length === 0) {
+    return attributes.map(({ smVariable }) => ({
+      ...common,
+      smvId: smVariable.id,
+      supported: false,
+      reason: `No response for evidence model '${evidenceModelId}' carried usable diagnostic evidence; the prior is unchanged, so no posterior is reported.`,
+    }));
+  }
+
+  const result = computeProfilePosterior(scoredResponses, attributes.map((a) => a.prior), family);
+
+  if (!result) {
+    /* Name the likely culprits. A single item calibrated to a boundary
+       estimate -- slip = guess = 0, which real DINA EM fits do produce --
+       makes a correct and an incorrect response to it jointly impossible,
+       and that one contradiction nullifies EVERY attribute and every other
+       response in the set. The refusal is mathematically right (decision
+       3), but a bare "could not be normalised" leaves an author with a
+       whole evidence model reporting nothing and no idea which item did
+       it. Deterministic items are where a contradiction can arise at all,
+       so they are the ones worth pointing at. */
+    const deterministic = [...new Set(
+      scoredResponses
+        .filter((r) => (family === "dina"
+          ? r.params.slip === 0 || r.params.guess === 0
+          : r.params.probabilities.some((p) => p === 0 || p === 1)))
+        .map((r) => r.itemId)
+    )];
+
+    const culprits = deterministic.length
+      ? ` The following item(s) are calibrated deterministically (a success or failure probability of exactly 0 or 1) and are the only ones capable of ruling a profile out outright: ${deterministic.join(", ")}.`
+      : "";
+
+    return attributes.map(({ smVariable }) => ({
+      ...common,
+      smvId: smVariable.id,
+      supported: false,
+      reason: `The attribute-mastery posterior could not be normalised: no profile carried usable probability mass, which means the responses are jointly impossible under this parameter set (or a declared prior rules out every profile).${culprits}`,
+    }));
+  }
+
+  return attributes.map(({ smVariable }, index) => {
+    const p = result.marginals[index];
+
+    return {
+      ...common,
+      smvId: smVariable.id,
+      smvType: smVariable.type,
+      method: "attribute-mastery-posterior",
+      supported: true,
+      estimate: p,
+      /* The posterior SD of a Bernoulli with probability p. Unlike the
+         raw-score branch, this needs no small-sample correction: p here is
+         a genuine posterior probability, not an observed proportion, so it
+         only reaches 0 or 1 when the model and data really do determine
+         the attribute -- it is not the artefact of a single unanimous
+         response that made the Wald SE unusable there. */
+      precision: Math.sqrt(Math.max(p * (1 - p), 0)),
+      sem: Math.sqrt(Math.max(p * (1 - p), 0)),
+      responsesUsed: scoredResponses.length,
+      responsesExcluded: excluded,
+    };
+  });
+}
+
+export const __testing__ = {
+  enumerateProfiles,
+  reducedPatternIndex,
+  masteryPrior,
+  dinaParametersAreUsable,
+  gdinaParametersAreUsable,
+  gdinaTableIsMonotonic,
+  gdinaTableIsInverted,
+  gdinaTableIsFlat,
+  computeProfilePosterior,
+  MAX_ATTRIBUTES,
+  REDUCED_PATTERN_ORDER,
+};

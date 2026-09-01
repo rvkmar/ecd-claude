@@ -42,6 +42,7 @@
 //    downward in exactly the situations where the item bank is weakest.
 
 import { SM_VARIABLE_TYPE_VALUES } from "../../src/utils/ecdVocabulary.js";
+import { accumulateAttributeMastery } from "./attributeAccumulation.js";
 
 /* Families that update a CONTINUOUS latent variable via a posterior over
    theta. Everything else dispatches to an explicit not-yet-supported
@@ -57,6 +58,16 @@ const CONTINUOUS_MODEL_FAMILIES = ["irt", "rasch"];
    construct, which is meaningless for an unordered set of states. */
 const RAW_SCORE_MODEL_FAMILIES = ["ctt", "sum", "threshold"];
 const RAW_SCORE_SMV_TYPES = ["continuous", "binary", "ordinal"];
+
+/* DINA / G-DINA: a joint posterior over 2^K binary attribute-mastery
+   profiles, marginalised to a mastery probability per attribute. Unlike
+   every other family here, one response set updates MANY Student Model
+   Variables at once, so this branch returns an array rather than a single
+   posterior. The math lives in ./attributeAccumulation.js -- a separate
+   module because it shares this file's conventions (direction handling,
+   refuse-don't-guess, log-space joint) but none of its quadrature
+   machinery. */
+const DIAGNOSTIC_MODEL_FAMILIES = ["dina", "gdina"];
 
 /* QUADRATURE GRID SIZING -- Day 31, hardened after an adversarial pass.
 
@@ -716,10 +727,14 @@ export function accumulateEvidence(session, db, options = {}) {
 
     const family = statisticalModel.type;
 
-    if (!CONTINUOUS_MODEL_FAMILIES.includes(family) && !RAW_SCORE_MODEL_FAMILIES.includes(family)) {
+    if (
+      !CONTINUOUS_MODEL_FAMILIES.includes(family) &&
+      !RAW_SCORE_MODEL_FAMILIES.includes(family) &&
+      !DIAGNOSTIC_MODEL_FAMILIES.includes(family)
+    ) {
       /* The per-family dispatch the build reference calls for. Bayesian-
-         network and DINA/G-DINA attribute-mastery updating are Week 8;
-         until they exist, saying so is the only honest output. */
+         network updating is still ahead; until it exists, saying so is the
+         only honest output. */
       posteriors.push({
         evidenceModelId,
         parameterSetId,
@@ -740,6 +755,17 @@ export function accumulateEvidence(session, db, options = {}) {
     const parameterSet = statisticalModel.parameterSets.find(
       (ps) => ps.parameterSetId === parameterSetId
     );
+
+    if (DIAGNOSTIC_MODEL_FAMILIES.includes(family)) {
+      // Returns one entry PER ATTRIBUTE, not one per evidence model.
+      posteriors.push(
+        ...accumulateAttributeMastery({
+          evidenceModelId, parameterSetId, family, evidenceModel, statisticalModel,
+          parameterSet, group, db, warnings, scoreResponse,
+        })
+      );
+      continue;
+    }
 
     /* Which SMV does this inform? Nothing in the schema yet declares the
        observable -> SMV binding (that is Day 34). Until it does, the only

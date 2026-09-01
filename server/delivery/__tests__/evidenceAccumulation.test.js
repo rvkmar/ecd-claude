@@ -641,18 +641,38 @@ describe("accumulateEvidence — the happy path", () => {
 
 describe("accumulateEvidence — refuses rather than guessing", () => {
   it("refuses an unimplemented model family with an explicit marker, not a number", () => {
-    // The single most important property in this file: DINA/G-DINA and the
-    // CTT/sum/threshold aggregates are Week 8. Until then they must not
-    // come back as a plausible estimate.
+    // The single most important property in this file: a family with no
+    // implementation must not come back as a plausible estimate.
+    //
+    // Day 36 note: this test used to pin "gdina", which is now implemented
+    // (see attributeAccumulation.test.js). Rather than delete the test --
+    // the property it guards is the whole point of the dispatch -- it now
+    // pins the family that IS still unimplemented. `bayesian_network` is a
+    // real entry in schema.js's allowed statisticalModels types with no
+    // accumulation branch behind it.
+    const db = makeDb();
+    db.evidenceModels[0].statisticalModels[0].type = "bayesian_network";
+
+    const { posteriors } = accumulateEvidence(sessionWith([makeResponse()]), db);
+
+    expect(posteriors[0].supported).toBe(false);
+    expect(posteriors[0].reason).toMatch(/'bayesian_network' model family is not implemented yet/);
+    expect(posteriors[0]).not.toHaveProperty("estimate");
+    expect(posteriors[0]).not.toHaveProperty("precision");
+  });
+
+  it("no longer refuses gdina outright -- it now dispatches to the attribute-mastery branch", () => {
+    // The inverted half of the test above. A gdina model with no Q-matrix
+    // still refuses, but for a SPECIFIC, actionable reason from the new
+    // branch, not the generic "not implemented yet" marker.
     const db = makeDb();
     db.evidenceModels[0].statisticalModels[0].type = "gdina";
 
     const { posteriors } = accumulateEvidence(sessionWith([makeResponse()]), db);
 
     expect(posteriors[0].supported).toBe(false);
-    expect(posteriors[0].reason).toMatch(/'gdina' model family is not implemented yet/);
-    expect(posteriors[0]).not.toHaveProperty("estimate");
-    expect(posteriors[0]).not.toHaveProperty("precision");
+    expect(posteriors[0].reason).not.toMatch(/not implemented yet/);
+    expect(posteriors[0].reason).toMatch(/declares no structureConfig\.qMatrixId/);
   });
 
   it("refuses when responses cite two different parameter sets", () => {
