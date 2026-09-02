@@ -54,8 +54,15 @@ Part 5.4 calls for ten shared primitives. An audit of `src/components/ui/` found
 |---|---|
 | Button, Input, Select, Tabs, Table, Badge, Card | ✅ exist (shadcn, `.tsx`, new-york style, `src/components/ui/*.tsx`) |
 | Toast | ⚠️ exists but as a bespoke 10-line component, not the shadcn/Radix pattern the rest of `ui/` follows — accessibility audit scheduled Day 43 |
-| Dialog | ❌ missing — scheduled Day 42 |
-| Combobox | ❌ missing — scheduled Day 42 |
+| Dialog | ✅ added Day 42 (`src/components/ui/dialog.tsx`, `@radix-ui/react-dialog`) |
+| Combobox | ✅ added Day 42 (`src/components/ui/combobox.tsx`, composed from new `popover.tsx` + `command.tsx`, matching shadcn's own documented pattern — there is no standalone "combobox" registry entry) |
+
+Day 42 note: `npx shadcn add ...` couldn't be used to generate these — `ui.shadcn.com` is blocked
+by this sandbox's egress allowlist (confirmed via a direct `curl`, not assumed). All three new
+files (`dialog.tsx`, `popover.tsx`, `command.tsx`) were hand-written to match the exact
+conventions of the existing shadcn output (`cva`/`cn`, `React.forwardRef`, the same
+`data-[state=...]` animation classes, `new-york` styling) rather than approximated freehand, so a
+future `shadcn add` (once network access allows it) should diff cleanly against them.
 
 Also present, not in Part 5.4's list but already shared infrastructure: Accordion, Checkbox,
 Label, Tooltip (shadcn), plus hand-built `Modal.jsx`, `Spinner.jsx`, `ErrorBoundary.jsx`,

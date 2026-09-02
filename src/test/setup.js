@@ -15,3 +15,25 @@ process.env.JWT_SECRET ||=
   "test-only-secret-do-not-use-outside-automated-tests-please-thanks";
 process.env.TOKEN_EXPIRES_IN ||= "1h";
 process.env.DB_MODE ||= "json";
+
+// Day 42 (Week 9): jsdom has no ResizeObserver at all, but cmdk (the
+// Command-palette primitive the new Combobox is built on -- see
+// src/components/ui/command.tsx) unconditionally observes element size in
+// an effect that runs on every render, crashing any test that mounts it.
+// A minimal no-op stub is standard practice for this exact gap (Radix's
+// own test suite ships one) -- nothing under test here reads actual
+// measured sizes, only that mounting/interacting doesn't throw.
+if (typeof globalThis.ResizeObserver === "undefined") {
+  globalThis.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
+
+// jsdom also has no scrollIntoView implementation at all (it throws
+// "not a function", not just a no-op) -- cmdk calls it on the highlighted
+// item whenever the active selection changes. Same rationale as above.
+if (typeof Element !== "undefined" && !Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = function scrollIntoView() {};
+}
