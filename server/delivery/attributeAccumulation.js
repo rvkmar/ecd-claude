@@ -710,6 +710,12 @@ export function accumulateAttributeMastery({
   const common = {
     evidenceModelId,
     parameterSetId,
+    // Day 38: always "calibrated" here -- accumulateEvidence() refuses a
+    // pilot/not-applicable group before this function is ever called (no
+    // item-level pilot DINA/G-DINA field exists yet). Carried explicitly
+    // anyway so a persisted posterior's provenance is self-describing
+    // without a reader having to know that rule.
+    parameterSource: "calibrated",
     modelFamily: family,
     competencyModelId: competencyModel.id,
   };

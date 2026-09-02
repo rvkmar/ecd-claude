@@ -1410,6 +1410,10 @@ describe("applyPosteriorsToSession — persisting the result onto the session", 
       smvType: "continuous",
       evidenceModelId: "em1",
       parameterSetId: "ps1",
+      // Day 38: parameterSource defaults to "calibrated" when the
+      // accumulation result (built here without one) predates the field --
+      // see applyPosteriorsToSession's own comment.
+      parameterSource: "calibrated",
       modelFamily: "irt",
       method: "eap",
       estimate: 0.83,

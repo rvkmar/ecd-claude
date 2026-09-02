@@ -46,8 +46,12 @@ import { accumulateAttributeMastery } from "./attributeAccumulation.js";
 
 /* Families that update a CONTINUOUS latent variable via a posterior over
    theta. Everything else dispatches to an explicit not-yet-supported
-   result -- see the dispatch table at the bottom of this file. */
-const CONTINUOUS_MODEL_FAMILIES = ["irt", "rasch"];
+   result -- see the dispatch table at the bottom of this file.
+   Exported (Day 38) so sessionRoutes.js can dispatch pilot-vs-calibrated
+   parameter resolution at submit time using the SAME family lists this
+   file dispatches on -- one definition, imported by both sides, matching
+   ecdVocabulary.js's own convention (build reference Part 1.1). */
+export const CONTINUOUS_MODEL_FAMILIES = ["irt", "rasch"];
 
 /* CTT / sum / threshold: a (possibly weighted) raw/observed score rather
    than a posterior over a latent trait. schema.js treats these three as
@@ -56,7 +60,7 @@ const CONTINUOUS_MODEL_FAMILIES = ["irt", "rasch"];
    Variable -- continuous, binary or ordinal, but never categorical, since
    a total presupposes that more evidence means further along the
    construct, which is meaningless for an unordered set of states. */
-const RAW_SCORE_MODEL_FAMILIES = ["ctt", "sum", "threshold"];
+export const RAW_SCORE_MODEL_FAMILIES = ["ctt", "sum", "threshold"];
 const RAW_SCORE_SMV_TYPES = ["continuous", "binary", "ordinal"];
 
 /* DINA / G-DINA: a joint posterior over 2^K binary attribute-mastery
@@ -67,7 +71,7 @@ const RAW_SCORE_SMV_TYPES = ["continuous", "binary", "ordinal"];
    module because it shares this file's conventions (direction handling,
    refuse-don't-guess, log-space joint) but none of its quadrature
    machinery. */
-const DIAGNOSTIC_MODEL_FAMILIES = ["dina", "gdina"];
+export const DIAGNOSTIC_MODEL_FAMILIES = ["dina", "gdina"];
 
 /* QUADRATURE GRID SIZING -- Day 31, hardened after an adversarial pass.
 
@@ -166,7 +170,7 @@ function normalLogDensity(x, mean, sd) {
  * reported theta = -2.214; c >= 1 makes the response certain regardless of
  * ability, again returning the prior. Excluded and warned about instead.
  */
-function itemParametersAreUsable(params) {
+export function itemParametersAreUsable(params) {
   if (!params || typeof params !== "object") return false;
   if (params.a !== undefined && !(Number.isFinite(params.a) && params.a > 0)) return false;
   if (params.b !== undefined && !Number.isFinite(params.b)) return false;
@@ -684,43 +688,126 @@ export function accumulateEvidence(session, db, options = {}) {
       continue;
     }
 
-    /* Resolve the statistical model by the parameter set the responses
-       were scored against -- decision 1 in the header. Responses in one
-       group may in principle cite different parameter sets (a session that
-       spanned a recalibration); that is a real situation and must not be
-       silently averaged over, so it is refused explicitly. */
+    /* Day 38 (Week 8): PILOT-VS-CALIBRATED SPLIT (build reference Part
+       0.2). Before this day, a response with no `parameterSetId` could not
+       reach this file at all -- sessionRoutes.js's /submit refused to
+       deliver any item whose Evidence Model had no active CALIBRATED
+       parameter set, full stop. That made the whole dependency chain
+       circular: R calibration needs a real response matrix (Part 0.2's
+       diagram), a response matrix needs items to be deliverable, and items
+       could not be delivered until calibration had already happened.
+       sessionRoutes.js now lets a continuous-family item score against the
+       Item Wizard's own pilot `psychometrics.irtParams` (Step 7) when no
+       calibrated parameter set exists yet, tagging the response
+       `parameterSource: "pilot"` instead of `"calibrated"`, and a
+       raw-score-family item (CTT/sum/threshold) needs no parameter set at
+       all -- it has never read one, `accumulateRawScoreFamily` below takes
+       only Task Model weights -- so it is tagged `"not-applicable"`.
+       A response predating this field carries neither `parameterSource`
+       nor an absent `parameterSetId` together (the old gate guaranteed
+       one), so it is treated as `"calibrated"` for backward compatibility.
+
+       Responses in one group may in principle cite different parameter
+       sets (a session that spanned a recalibration), or even mix pilot and
+       calibrated evidence for the same Evidence Model (a session that
+       started before a recalibration finished). Neither is silently
+       averaged over -- both are refused explicitly, for the same reason
+       the original mixed-parameterSetId check existed: a single posterior
+       over evidence measured two different ways is not interpretable. */
+    const effectiveSource = (r) => r.parameterSource || (r.parameterSetId ? "calibrated" : null);
+    const parameterSources = [...new Set(group.map(effectiveSource).filter(Boolean))];
+
+    if (parameterSources.length > 1) {
+      posteriors.push({
+        evidenceModelId,
+        supported: false,
+        reason: `Responses for evidence model '${evidenceModelId}' were scored under ${parameterSources.length} different parameter sources (${parameterSources.join(", ")}); a single posterior mixing pilot and calibrated evidence would not be interpretable.`,
+      });
+      continue;
+    }
+
+    const parameterSource = parameterSources[0] || null;
     const parameterSetIds = [...new Set(group.map((r) => r.parameterSetId).filter(Boolean))];
 
-    if (parameterSetIds.length === 0) {
+    if (parameterSource === "pilot") {
+      if (parameterSetIds.length > 0) {
+        posteriors.push({
+          evidenceModelId,
+          supported: false,
+          reason: `Responses for evidence model '${evidenceModelId}' are tagged parameterSource 'pilot' but also carry a parameterSetId; refusing rather than guessing which is authoritative.`,
+        });
+        continue;
+      }
+    } else if (parameterSource === "calibrated") {
+      if (parameterSetIds.length === 0) {
+        posteriors.push({
+          evidenceModelId,
+          supported: false,
+          reason: `No response for evidence model '${evidenceModelId}' records the parameterSetId it was scored against.`,
+        });
+        continue;
+      }
+
+      if (parameterSetIds.length > 1) {
+        posteriors.push({
+          evidenceModelId,
+          supported: false,
+          reason: `Responses for evidence model '${evidenceModelId}' cite ${parameterSetIds.length} different parameter sets (${parameterSetIds.join(", ")}); a single posterior over mixed calibrations would not be interpretable.`,
+        });
+        continue;
+      }
+    }
+
+    const parameterSetId = parameterSetIds[0] || null;
+
+    /* Resolve the statistical model. A calibrated (or legacy, undated)
+       group is resolved STRICTLY by the parameter set the responses were
+       scored against -- decision 1 in the header, unchanged, and a
+       parameterSetId that does not resolve is refused outright rather than
+       silently redirected to whichever statistical model happens to be
+       active (that would report a posterior against a DIFFERENT
+       calibration than the one the response actually cites). A pilot or
+       not-applicable group carries no parameterSetId to resolve from AT
+       ALL -- that is the whole distinction -- so only THAT case falls back
+       to the Evidence Model's own ACTIVE statistical model, the same
+       resolution sessionRoutes.js already used to decide which family an
+       item belongs to at submit time. */
+    let statisticalModel;
+
+    if (parameterSetId) {
+      statisticalModel = (evidenceModel.statisticalModels || []).find((sm) =>
+        (sm.parameterSets || []).some((ps) => ps.parameterSetId === parameterSetId)
+      );
+
+      if (!statisticalModel) {
+        posteriors.push({
+          evidenceModelId,
+          parameterSetId,
+          supported: false,
+          reason: `No statistical model on evidence model '${evidenceModelId}' owns parameter set '${parameterSetId}'.`,
+        });
+        continue;
+      }
+    } else if (parameterSource === "pilot" || parameterSource === "not-applicable") {
+      statisticalModel = (evidenceModel.statisticalModels || []).find((sm) => sm.active);
+
+      if (!statisticalModel) {
+        posteriors.push({
+          evidenceModelId,
+          parameterSetId: null,
+          supported: false,
+          reason: `Evidence model '${evidenceModelId}' has no active statistical model to resolve '${parameterSource}' evidence against.`,
+        });
+        continue;
+      }
+    } else {
+      // No response in this group recorded EITHER a parameterSetId or a
+      // parameterSource -- a genuinely ambiguous group this module refuses
+      // to guess about, matching this file's standing rule throughout.
       posteriors.push({
         evidenceModelId,
         supported: false,
         reason: `No response for evidence model '${evidenceModelId}' records the parameterSetId it was scored against.`,
-      });
-      continue;
-    }
-
-    if (parameterSetIds.length > 1) {
-      posteriors.push({
-        evidenceModelId,
-        supported: false,
-        reason: `Responses for evidence model '${evidenceModelId}' cite ${parameterSetIds.length} different parameter sets (${parameterSetIds.join(", ")}); a single posterior over mixed calibrations would not be interpretable.`,
-      });
-      continue;
-    }
-
-    const parameterSetId = parameterSetIds[0];
-
-    const statisticalModel = (evidenceModel.statisticalModels || []).find((sm) =>
-      (sm.parameterSets || []).some((ps) => ps.parameterSetId === parameterSetId)
-    );
-
-    if (!statisticalModel) {
-      posteriors.push({
-        evidenceModelId,
-        parameterSetId,
-        supported: false,
-        reason: `No statistical model on evidence model '${evidenceModelId}' owns parameter set '${parameterSetId}'.`,
       });
       continue;
     }
@@ -747,12 +834,30 @@ export function accumulateEvidence(session, db, options = {}) {
 
     if (RAW_SCORE_MODEL_FAMILIES.includes(family)) {
       posteriors.push(
-        accumulateRawScoreFamily({ evidenceModelId, parameterSetId, family, evidenceModel, statisticalModel, group, db, warnings })
+        accumulateRawScoreFamily({ evidenceModelId, parameterSetId, parameterSource, family, evidenceModel, statisticalModel, group, db, warnings })
       );
       continue;
     }
 
-    const parameterSet = statisticalModel.parameterSets.find(
+    if (DIAGNOSTIC_MODEL_FAMILIES.includes(family) && !parameterSetId) {
+      /* No item-level schema field exists yet for a pilot DINA/G-DINA
+         (slip/guess, or a saturated probability table) the way
+         `psychometrics.irtParams` exists for IRT -- Day 38's own exit
+         check is honest refusal over invention where a field genuinely
+         does not exist. sessionRoutes.js does not offer this family a
+         pilot path for exactly this reason (see its own comment); this is
+         the defensive twin of that gate for a group reaching this file by
+         some other route. */
+      posteriors.push({
+        evidenceModelId,
+        modelFamily: family,
+        supported: false,
+        reason: `Evidence model '${evidenceModelId}' has no active calibrated parameter set. Pilot parameters are not yet supported for the '${family}' family (no item-level pilot slip/guess or probability-table field exists) -- only continuous (IRT/Rasch) items can score against pilot values today.`,
+      });
+      continue;
+    }
+
+    const parameterSet = (statisticalModel.parameterSets || []).find(
       (ps) => ps.parameterSetId === parameterSetId
     );
 
@@ -816,17 +921,33 @@ export function accumulateEvidence(session, db, options = {}) {
         continue;
       }
 
-      const params = parameterSet?.parameters?.[r.observableId];
+      /* Day 38: a PILOT-sourced group has no parameterSet at all -- its
+         numbers live on the item that produced the response
+         (`item.psychometrics.irtParams`, Item Wizard Step 7), not on the
+         Evidence Model. A CALIBRATED (or legacy) group is unchanged: the
+         parameter set's own `parameters[observableId]` map, exactly as
+         before Day 38. */
+      let params;
+      let sourceLabel;
+
+      if (parameterSource === "pilot") {
+        const item = (db.items || []).find((it) => it.id === r.itemId);
+        params = item?.psychometrics?.irtParams;
+        sourceLabel = `item '${r.itemId}''s pilot psychometrics.irtParams`;
+      } else {
+        params = parameterSet?.parameters?.[r.observableId];
+        sourceLabel = `parameter set '${parameterSetId}'`;
+      }
 
       if (!params) {
         excluded += 1;
-        warnings.push(`Parameter set '${parameterSetId}' has no parameters for observable '${r.observableId}'; that response was excluded.`);
+        warnings.push(`${sourceLabel[0].toUpperCase()}${sourceLabel.slice(1)} has no parameters for observable '${r.observableId}'; that response was excluded.`);
         continue;
       }
 
       if (!itemParametersAreUsable(params)) {
         excluded += 1;
-        warnings.push(`Parameter set '${parameterSetId}' has unusable IRT parameters for observable '${r.observableId}' (a must be > 0, c in [0,1)); that response was excluded.`);
+        warnings.push(`${sourceLabel[0].toUpperCase()}${sourceLabel.slice(1)} has unusable IRT parameters for observable '${r.observableId}' (a must be > 0, c in [0,1)); that response was excluded.`);
         continue;
       }
 
@@ -866,6 +987,7 @@ export function accumulateEvidence(session, db, options = {}) {
       smvType: smVariable.type,
       evidenceModelId,
       parameterSetId,
+      parameterSource: parameterSource || "calibrated",
       modelFamily: family,
       competencyModelId,
       method: "eap",
@@ -928,6 +1050,12 @@ export function applyPosteriorsToSession(session, accumulationResult, options = 
       smvType: posterior.smvType,
       evidenceModelId: posterior.evidenceModelId,
       parameterSetId: posterior.parameterSetId,
+      // Day 38: "calibrated" | "pilot" | "not-applicable" -- see the
+      // pilot-vs-calibrated split note in accumulateEvidence(). Defaulted
+      // to "calibrated" for a posterior computed before this field
+      // existed, matching every response persisted under the old,
+      // calibrated-only gate.
+      parameterSource: posterior.parameterSource || "calibrated",
       modelFamily: posterior.modelFamily,
       method: posterior.method,
       estimate: posterior.estimate,
@@ -1006,7 +1134,7 @@ function resolveSmVariable(evidenceModel, statisticalModel, db, allowedTypes) {
  * grid machinery -- there is no prior distribution or likelihood surface
  * here, only a (possibly weighted) observed proportion.
  */
-function accumulateRawScoreFamily({ evidenceModelId, parameterSetId, family, evidenceModel, statisticalModel, group, db, warnings }) {
+function accumulateRawScoreFamily({ evidenceModelId, parameterSetId, parameterSource, family, evidenceModel, statisticalModel, group, db, warnings }) {
   const smvResolution = resolveSmVariable(evidenceModel, statisticalModel, db, RAW_SCORE_SMV_TYPES);
 
   if (!smvResolution.smVariable) {
@@ -1072,6 +1200,7 @@ function accumulateRawScoreFamily({ evidenceModelId, parameterSetId, family, evi
     smvType: smVariable.type,
     evidenceModelId,
     parameterSetId,
+    parameterSource: parameterSource || "not-applicable",
     modelFamily: family,
     competencyModelId,
     method: "weighted-proportion",

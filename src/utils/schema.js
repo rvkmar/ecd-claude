@@ -3712,10 +3712,32 @@ export function validateEntity(collection, obj, db = null, options = {}) {
             errors.push(`${prefix}.smvId ('${posterior.smvId}') must match its own key ('${smvId}').`);
           }
 
-          for (const field of ["evidenceModelId", "parameterSetId", "modelFamily", "method"]) {
+          for (const field of ["evidenceModelId", "modelFamily", "method"]) {
             if (typeof posterior[field] !== "string" || !posterior[field]) {
               errors.push(`${prefix}.${field} must be a non-empty string.`);
             }
+          }
+
+          // Day 38 (Week 8, pilot-vs-calibrated split, build reference
+          // Part 0.2): `parameterSetId` is only meaningful for a
+          // "calibrated" posterior -- a "pilot" one has no parameter set
+          // to point at (its numbers live on the scoring item itself), and
+          // a "not-applicable" one (CTT/sum/threshold) never had one to
+          // begin with. Absent `parameterSource` defaults to "calibrated"
+          // for a posterior persisted before this field existed, so the
+          // requirement below is unchanged for every pre-Day-38 record.
+          const parameterSource = posterior.parameterSource || "calibrated";
+
+          if (!["calibrated", "pilot", "not-applicable"].includes(parameterSource)) {
+            errors.push(`${prefix}.parameterSource ('${posterior.parameterSource}') must be one of: calibrated, pilot, not-applicable.`);
+          }
+
+          if (parameterSource === "calibrated") {
+            if (typeof posterior.parameterSetId !== "string" || !posterior.parameterSetId) {
+              errors.push(`${prefix}.parameterSetId must be a non-empty string for a 'calibrated' posterior.`);
+            }
+          } else if (posterior.parameterSetId != null) {
+            errors.push(`${prefix}.parameterSetId must be absent for a '${parameterSource}' posterior (it has no calibrated parameter set to point at).`);
           }
 
           if (!Number.isFinite(posterior.estimate)) {
@@ -3813,20 +3835,41 @@ export function validateEntity(collection, obj, db = null, options = {}) {
             continue;
           }
 
-          if (!r.parameterSetId) {
-            errors.push(
-              `Session response for evidence ${r.evidenceModelId} missing parameterSetId.`
-            );
-          } else {
-            const sm = evidence.statisticalModels?.find(
-              sm => sm.active
-            );
+          // Day 38 (Week 8, pilot-vs-calibrated split): `parameterSetId`
+          // is only required, and only checked against the Evidence
+          // Model's active calibrated set, for a "calibrated" response.
+          // A response with no `parameterSource` at all predates this
+          // field and is exactly the old calibrated-only shape, so it is
+          // treated as "calibrated" for backward compatibility. A "pilot"
+          // response must NOT carry a parameterSetId (its numbers live on
+          // the item, not the Evidence Model), and a "not-applicable"
+          // (CTT/sum/threshold) response never had one to check.
+          const responseParameterSource = r.parameterSource || "calibrated";
 
-            if (!sm || sm.activeParameterSetId !== r.parameterSetId) {
+          if (!["calibrated", "pilot", "not-applicable"].includes(responseParameterSource)) {
+            errors.push(
+              `Session response for evidence ${r.evidenceModelId} has invalid parameterSource '${r.parameterSource}'.`
+            );
+          } else if (responseParameterSource === "calibrated") {
+            if (!r.parameterSetId) {
               errors.push(
-                `Session response parameterSetId mismatch for evidence ${r.evidenceModelId}.`
+                `Session response for evidence ${r.evidenceModelId} missing parameterSetId.`
               );
+            } else {
+              const sm = evidence.statisticalModels?.find(
+                sm => sm.active
+              );
+
+              if (!sm || sm.activeParameterSetId !== r.parameterSetId) {
+                errors.push(
+                  `Session response parameterSetId mismatch for evidence ${r.evidenceModelId}.`
+                );
+              }
             }
+          } else if (r.parameterSetId) {
+            errors.push(
+              `Session response for evidence ${r.evidenceModelId} is '${responseParameterSource}' but carries a parameterSetId; it should have none.`
+            );
           }
 
           const competency = db.competencies?.find(

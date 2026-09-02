@@ -281,7 +281,7 @@ describe("POST /:id/submit — item-based delivery (Day 28)", () => {
     expect(res.body.error).toMatch(/Invalid itemId/);
   });
 
-  it("refuses to score against an Evidence Model with no active calibrated parameter set yet", async () => {
+  it("refuses to score against an Evidence Model with no active statistical model at all", async () => {
     const uncalibratedEvidenceModel = { ...evidenceModel, statisticalModels: [] };
     const db = makeDb({ evidenceModels: [uncalibratedEvidenceModel] });
     const app = buildApp(db);
@@ -291,7 +291,69 @@ describe("POST /:id/submit — item-based delivery (Day 28)", () => {
       .send({ taskId: "t1", itemId: "item1", rawAnswer: "opt_a" });
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/has no active calibrated parameter set yet/);
+    expect(res.body.error).toMatch(/has no active statistical model/);
+  });
+
+  // Day 38 (Week 8): the pilot-vs-calibrated split (build reference Part
+  // 0.2). An Evidence Model can have an ACTIVE statistical model with no
+  // calibrated parameter set yet (an authored-but-never-calibrated IRT
+  // model, the ordinary state of a brand-new item) -- before Day 38 that
+  // refused delivery outright with the same message the previous test used
+  // to expect. It now falls back to the item's own pilot
+  // `psychometrics.irtParams` (Item Wizard Step 7).
+  it("refuses delivery when the active statistical model has no calibrated set AND the item carries no usable pilot IRT parameters", async () => {
+    const noCalibrationYet = {
+      ...evidenceModel,
+      statisticalModels: [{ ...evidenceModel.statisticalModels[0], parameterSets: [], activeParameterSetId: undefined }],
+    };
+    const db = makeDb({ evidenceModels: [noCalibrationYet] }); // `item` fixture carries no psychometrics.irtParams
+    const app = buildApp(db);
+
+    const res = await request(app)
+      .post("/api/sessions/s1/submit")
+      .send({ taskId: "t1", itemId: "item1", rawAnswer: "opt_a" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/no usable pilot IRT parameters/);
+  });
+
+  it("falls back to the item's pilot IRT parameters when the Evidence Model has no calibrated set yet, and tags the response 'pilot'", async () => {
+    const noCalibrationYet = {
+      ...evidenceModel,
+      statisticalModels: [{ ...evidenceModel.statisticalModels[0], parameterSets: [], activeParameterSetId: undefined }],
+    };
+    const pilotItem = { ...item, psychometrics: { statisticalModelType: "irt", irtParams: { a: 1, b: 0 } } };
+    const db = makeDb({ evidenceModels: [noCalibrationYet], items: [pilotItem] });
+    const app = buildApp(db);
+
+    const res = await request(app)
+      .post("/api/sessions/s1/submit")
+      .send({ taskId: "t1", itemId: "item1", rawAnswer: "opt_a" });
+
+    expect(res.status).toBe(200);
+    const response = res.body.responses[0];
+    expect(response.parameterSource).toBe("pilot");
+    expect(response.parameterSetId).toBeFalsy();
+    expect(response.activated).toBe(true);
+  });
+
+  it("delivers a raw-score (CTT/sum/threshold) item with no parameter set at all, tagged 'not-applicable'", async () => {
+    const rawScoreEvidenceModel = {
+      ...evidenceModel,
+      statisticalModels: [{ id: "sm1", type: "sum", active: true, structureConfig: {}, parameterSets: [] }],
+    };
+    const db = makeDb({ evidenceModels: [rawScoreEvidenceModel] });
+    const app = buildApp(db);
+
+    const res = await request(app)
+      .post("/api/sessions/s1/submit")
+      .send({ taskId: "t1", itemId: "item1", rawAnswer: "opt_a" });
+
+    expect(res.status).toBe(200);
+    const response = res.body.responses[0];
+    expect(response.parameterSource).toBe("not-applicable");
+    expect(response.parameterSetId).toBeFalsy();
+    expect(response.activated).toBe(true);
   });
 
   it("accepts a structured work product object as rawAnswer, passed through as-is", async () => {

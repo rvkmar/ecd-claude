@@ -4,7 +4,13 @@ import { loadDB, saveDB, finishSession } from "../../src/utils/db-server.js";
 import { validateEntity } from "../../src/utils/schema.js";
 import { SESSION_STATUS } from "../../src/utils/sessionStatus.js";
 import { identifyEvidence } from "../delivery/evidenceIdentification.js";
-import { accumulateEvidence, applyPosteriorsToSession } from "../delivery/evidenceAccumulation.js";
+import {
+  accumulateEvidence,
+  applyPosteriorsToSession,
+  CONTINUOUS_MODEL_FAMILIES,
+  RAW_SCORE_MODEL_FAMILIES,
+  itemParametersAreUsable,
+} from "../delivery/evidenceAccumulation.js";
 import { resolveAssemblyProgress } from "../delivery/assemblyProgress.js";
 import { recordItemUsage } from "../utils/itemExposure.js";
 import { log2 } from "mathjs"; // if not available, define inline
@@ -231,22 +237,70 @@ router.post("/:id/submit", async (req, res) => {
     // src/utils/schema.js's `collection === "sessions"` validation (a
     // pre-existing contract this route never previously had a caller for)
     // requires every response, once a session is live, to carry calibration
-    // provenance: which Evidence Model + version, and which calibrated
-    // parameterSet was active when the response was scored -- a pointer,
-    // never a cached parameter value, matching ADR 0003's "resolve live"
-    // boundary. An Evidence Model with no active calibrated parameterSet
-    // yet genuinely cannot deliver -- surfaced here as a clear, specific
-    // error rather than a confusing generic schema-validation failure.
+    // provenance: which Evidence Model + version, and -- for a CALIBRATED
+    // response -- which calibrated parameterSet was active when the
+    // response was scored -- a pointer, never a cached parameter value,
+    // matching ADR 0003's "resolve live" boundary.
+    //
+    // Day 38 (Week 8): before this day, an Evidence Model with no active
+    // calibrated parameterSet yet genuinely could not deliver, full stop --
+    // which made the build reference's own dependency chain (Part 0.2)
+    // circular: R calibration needs a real item-level response matrix,
+    // that matrix needs items to be deliverable, and items could not be
+    // delivered until calibration had already happened. The fix is the
+    // PILOT-VS-CALIBRATED split the build reference names as the way out:
+    // a continuous (IRT/Rasch) item falls back to the Item Wizard's own
+    // pilot `psychometrics.irtParams` (Step 7) when no calibrated set
+    // exists, and a raw-score item (CTT/sum/threshold) never needed
+    // calibrated numbers to begin with -- `accumulateRawScoreFamily` in
+    // evidenceAccumulation.js has never read a parameterSet, only Task
+    // Model weights. DINA/G-DINA has no item-level pilot field yet (no
+    // `psychometrics.dinaParams` the way IRT has `irtParams`), so it is
+    // deliberately NOT given a pilot fallback here -- inventing one would
+    // be the kind of confidently-wrong number this whole pipeline exists
+    // to refuse. `CONTINUOUS_MODEL_FAMILIES` / `RAW_SCORE_MODEL_FAMILIES`
+    // are imported from evidenceAccumulation.js rather than re-listed here,
+    // so this gate and that file's own dispatch can never drift apart.
     const evidenceModelRecord = db.evidenceModels?.find(em => em.id === item.evidenceModelId);
-    const activeStatModel = evidenceModelRecord?.statisticalModels?.find(sm => sm.active);
-    const parameterSetId = activeStatModel?.activeParameterSetId;
 
     if (!evidenceModelRecord) {
       return res.status(400).json({ error: `Item '${itemId}' references unknown evidenceModelId '${item.evidenceModelId}'.` });
     }
-    if (!parameterSetId) {
+
+    const activeStatModel = evidenceModelRecord.statisticalModels?.find(sm => sm.active);
+
+    if (!activeStatModel) {
       return res.status(400).json({
-        error: `Evidence model '${item.evidenceModelId}' has no active calibrated parameter set yet; item '${itemId}' cannot be scored through it.`,
+        error: `Evidence model '${item.evidenceModelId}' has no active statistical model; item '${itemId}' cannot be scored through it.`,
+      });
+    }
+
+    const family = activeStatModel.type;
+    const calibratedParameterSetId = activeStatModel.activeParameterSetId || null;
+
+    let parameterSetId = null;
+    let parameterSource = null;
+
+    if (RAW_SCORE_MODEL_FAMILIES.includes(family)) {
+      // Never needed a calibrated parameterSet; a weighted proportion over
+      // Task Model weights, nothing more.
+      parameterSource = "not-applicable";
+    } else if (calibratedParameterSetId) {
+      parameterSetId = calibratedParameterSetId;
+      parameterSource = "calibrated";
+    } else if (CONTINUOUS_MODEL_FAMILIES.includes(family)) {
+      const pilotParams = item.psychometrics?.irtParams;
+
+      if (!itemParametersAreUsable(pilotParams)) {
+        return res.status(400).json({
+          error: `Evidence model '${item.evidenceModelId}' has no active calibrated parameter set, and item '${itemId}' carries no usable pilot IRT parameters (psychometrics.irtParams needs at least a > 0 and a finite b) for a '${family}' model to fall back on.`,
+        });
+      }
+
+      parameterSource = "pilot";
+    } else {
+      return res.status(400).json({
+        error: `Evidence model '${item.evidenceModelId}' has no active calibrated parameter set yet; item '${itemId}' cannot be scored through it. Pilot parameters are not yet supported for the '${family}' family.`,
       });
     }
 
@@ -284,6 +338,7 @@ router.post("/:id/submit", async (req, res) => {
       evidenceModelId: item.evidenceModelId,
       evidenceModelVersion: evidenceModelRecord.versionNumber,
       parameterSetId,
+      parameterSource,
       rawAnswer: rawAnswer ?? null,
       observationId: evidence.observationId,
       observableId: evidence.observableId,
