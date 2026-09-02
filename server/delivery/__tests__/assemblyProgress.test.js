@@ -15,6 +15,12 @@ function posterior(overrides = {}) {
     supported: true,
     estimate: 0.5,
     precision: 0.3,
+    // Day 39: the theta-scale check now gates on `method`, not `smvType`
+    // (see assemblyProgress.js's own comment) -- "eap" is the continuous
+    // IRT/Rasch branch's method and is the realistic default for a
+    // fixture that otherwise looks like a continuous posterior.
+    method: "eap",
+    modelFamily: "irt",
     ...overrides,
   };
 }
@@ -114,9 +120,9 @@ describe("resolveAssemblyProgress", () => {
     expect(resolveAssemblyProgress(undefined, { assemblyModels: [] })).toEqual([]);
   });
 
-  it("refuses to compare a requiredSEM target against a non-continuous posterior's precision", () => {
+  it("refuses to compare a requiredSEM target against a non-EAP posterior's precision (attribute mastery)", () => {
     const result = resolveAssemblyProgress(
-      [posterior({ smvType: "binary", precision: 0.1 })],
+      [posterior({ smvType: "binary", method: "attribute-mastery-posterior", modelFamily: "dina", precision: 0.1 })],
       { assemblyModels: [assemblyModel()] }
     );
     expect(result).toEqual([{
@@ -126,19 +132,34 @@ describe("resolveAssemblyProgress", () => {
       precision: 0.1,
       requiredSEM: 0.4,
       stoppingCriterionMet: null,
-      note: "A requiredSEM target is defined on the theta scale and cannot be compared to a 'binary' Student Model Variable's precision.",
+      note: "A requiredSEM target is defined on the theta scale and cannot be compared to a 'dina' model's precision (method: 'attribute-mastery-posterior').",
     }]);
   });
 
-  it("still evaluates a requiredSEM target normally when smvType is 'continuous' or absent", () => {
+  // Day 39 (adversarial review, P1-6): a raw-score (CTT/sum/threshold)
+  // model is explicitly allowed on a `continuous` SMV (RAW_SCORE_SMV_TYPES
+  // in evidenceAccumulation.js), so `smvType === "continuous"` alone does
+  // NOT mean the precision is on the theta scale -- its "weighted-
+  // proportion" method must still be refused the same way attribute
+  // mastery is, which the old smvType-only gate missed entirely.
+  it("refuses to compare a requiredSEM target against a raw-score posterior's precision, even though its smvType is 'continuous'", () => {
+    const result = resolveAssemblyProgress(
+      [posterior({ smvType: "continuous", method: "weighted-proportion", modelFamily: "sum", precision: 0.2 })],
+      { assemblyModels: [assemblyModel()] }
+    );
+    expect(result[0].stoppingCriterionMet).toBeNull();
+    expect(result[0].note).toMatch(/cannot be compared to a 'sum' model's precision/);
+  });
+
+  it("still evaluates a requiredSEM target normally for an EAP (continuous IRT/Rasch) posterior", () => {
     const withType = resolveAssemblyProgress(
-      [posterior({ smvType: "continuous", precision: 0.3 })],
+      [posterior({ smvType: "continuous", method: "eap", precision: 0.3 })],
       { assemblyModels: [assemblyModel()] }
     );
     expect(withType[0].stoppingCriterionMet).toBe(true);
 
     const withoutType = resolveAssemblyProgress(
-      [posterior({ precision: 0.3 })],
+      [posterior({ precision: 0.3 })], // helper's default is already method: "eap"
       { assemblyModels: [assemblyModel()] }
     );
     expect(withoutType[0].stoppingCriterionMet).toBe(true);

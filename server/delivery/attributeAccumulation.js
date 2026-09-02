@@ -317,21 +317,69 @@ function gdinaParametersAreUsable(params, requiredCount) {
 }
 
 /**
+ * The graded-lexicographic row index (see REDUCED_PATTERN_ORDER /
+ * `reducedPatternIndex` above) of the profile whose mastered-required-
+ * attributes are given as a plain little-endian bitmask over `m` bits
+ * (bit i set = required attribute i is mastered). This is the same
+ * ranking `reducedPatternIndex` computes from a full profile array plus
+ * `requiredIndices`, restated to take a bare mask directly -- convenient
+ * here where there is no full profile, only "which of the m required
+ * attributes are mastered".
+ */
+function gradedLexIndexOfMask(mask, m) {
+  const mastered = [];
+  for (let bit = 0; bit < m; bit += 1) {
+    if ((mask >> bit) & 1) mastered.push(bit);
+  }
+
+  const weight = mastered.length;
+  if (weight === 0) return 0;
+  if (weight === m) return (2 ** m) - 1;
+
+  let offset = 1;
+  for (let w = 1; w < weight; w += 1) offset += binomial(m, w);
+
+  return offset + combinationLexRank(mastered, m);
+}
+
+/**
  * Is a saturated G-DINA table monotonic -- does mastering an ADDITIONAL
  * required attribute never reduce the probability of success?
  *
  * Not a refusal (decision 4), but worth surfacing: a non-monotonic
  * estimate usually means a small calibration sample or a misspecified
  * Q-vector, and it is invisible in the posterior it produces.
+ *
+ * Day 39 (adversarial review, P2-7): `probabilities` is indexed in
+ * REDUCED_PATTERN_ORDER (graded-lexicographic -- see the block comment
+ * above `reducedPatternIndex`), NOT as a plain little-endian binary
+ * counter. The original version of this function walked `pattern` and
+ * `pattern + (1 << bit)` as if they WERE direct table indices -- the two
+ * orderings coincide only for m <= 2 required attributes (which is all
+ * the existing tests exercised), and diverge for m >= 3, so this could
+ * compare the wrong pair of rows and report a table "monotonic" (or
+ * flag one as non-monotonic) based on entries that don't actually
+ * correspond to "one more attribute mastered". Fixed by treating
+ * `pattern` as a bitmask over WHICH required attributes are mastered
+ * (the same convention `reducedPatternIndex` takes a full profile in)
+ * and translating both the base and the one-more-mastered mask through
+ * `gradedLexIndexOfMask` before indexing `probabilities`.
  */
 function gdinaTableIsMonotonic(probabilities, requiredCount) {
-  for (let pattern = 0; pattern < probabilities.length; pattern += 1) {
+  const total = 2 ** requiredCount;
+
+  for (let mask = 0; mask < total; mask += 1) {
+    const baseIndex = gradedLexIndexOfMask(mask, requiredCount);
+
     for (let bit = 0; bit < requiredCount; bit += 1) {
-      if ((pattern >> bit) & 1) continue;          // already mastered
-      const withOneMore = pattern + (1 << bit);
-      if (probabilities[withOneMore] < probabilities[pattern]) return false;
+      if ((mask >> bit) & 1) continue;          // already mastered
+      const withOneMore = mask + (1 << bit);
+      const withOneMoreIndex = gradedLexIndexOfMask(withOneMore, requiredCount);
+
+      if (probabilities[withOneMoreIndex] < probabilities[baseIndex]) return false;
     }
   }
+
   return true;
 }
 
@@ -761,8 +809,34 @@ export function accumulateAttributeMastery({
     }));
   }
 
+  /* Day 39 (adversarial review, P1-4): which attribute INDICES were
+     actually touched by at least one scored response's Q-vector. Before
+     this, every attribute in the Q-matrix got a "supported: true"
+     posterior regardless of whether any delivered item measured it -- an
+     attribute nothing measured got its marginal back EXACTLY (the prior
+     the joint posterior started from), reported at a real-looking
+     precision and a real-looking responsesUsed count, indistinguishable
+     from a genuine measurement that happened to land near the prior. The
+     continuous and raw-score branches both already refuse this exact
+     situation ("the prior is unchanged, so no posterior is reported") --
+     this makes the diagnostic branch agree with them. */
+  const touchedIndices = new Set();
+  for (const response of scoredResponses) {
+    for (const index of response.requiredIndices) touchedIndices.add(index);
+  }
+
   return attributes.map(({ smVariable }, index) => {
+    if (!touchedIndices.has(index)) {
+      return {
+        ...common,
+        smvId: smVariable.id,
+        supported: false,
+        reason: `No scored response for evidence model '${evidenceModelId}' required attribute '${smVariable.id}' in its Q-vector; the prior is unchanged, so no posterior is reported.`,
+      };
+    }
+
     const p = result.marginals[index];
+    const responsesForAttribute = scoredResponses.filter((r) => r.requiredIndices.includes(index)).length;
 
     return {
       ...common,
@@ -779,7 +853,14 @@ export function accumulateAttributeMastery({
          response that made the Wald SE unusable there. */
       precision: Math.sqrt(Math.max(p * (1 - p), 0)),
       sem: Math.sqrt(Math.max(p * (1 - p), 0)),
-      responsesUsed: scoredResponses.length,
+      // Day 39: counted per-attribute (only responses whose Q-vector
+      // actually includes this attribute), not the whole group's response
+      // count -- the joint posterior is computed over every scored
+      // response at once (attributes are not independent, decision 2 in
+      // this file's header), but "responsesUsed" reporting the FULL group
+      // size for every attribute overstated how much evidence a
+      // lightly-measured attribute actually had.
+      responsesUsed: responsesForAttribute,
       responsesExcluded: excluded,
     };
   });

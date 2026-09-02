@@ -530,6 +530,27 @@ function resolveObservationWeight(response, db) {
  * textbook remedy for exactly this failure mode, not an invented
  * correction; it degrades gracefully to the familiar sqrt(p(1-p)/n) shape
  * as the effective sample size grows.
+ *
+ * Day 39 (adversarial review, P0-2): the pseudo-count denominator is
+ * KISH'S EFFECTIVE SAMPLE SIZE, (Sw)^2 / S(w^2), not the raw weight sum
+ * `Sw` a first pass used. `weight` here is `resolveObservationWeight()`'s
+ * per-observable ALLOCATION SHARE -- schema.js requires a Task Model's
+ * `expectedObservations[].weight` to sum to exactly 1 across the whole
+ * model ("Observable weights must sum to 1") -- so `Sw` is architecturally
+ * fixed near 1 regardless of how many responses were actually scored.
+ * Using it as `nEff` froze the reported SE at the SAME number for 5, 20,
+ * and 50 correct responses to a five-observable Task Model (measured:
+ * 0.2191 in every case) -- fifty items reported no more precise than one --
+ * and, in the opposite direction, an author using points-style weights
+ * above 1 (a Task Model where that is legal) shrank the SE by the weight
+ * itself, reporting confidence a handful of high-weight responses never
+ * earned (measured: a weight of 10 on 3 responses reported an SE 4.2x too
+ * narrow). Kish's nEff is the standard fix for a weighted-proportion's
+ * effective sample size: it reduces to exactly `n` for any UNIFORM
+ * weighting (1 each, or 1/n each, or any other constant), which is why
+ * neither symptom above showed up in this file's original test fixtures
+ * (all of which used `weight: 1` throughout), and degrades correctly for
+ * genuinely mixed weights in between.
  */
 function estimateRawScore(scoredObservations) {
   const totalWeight = scoredObservations.reduce((acc, o) => acc + o.weight, 0);
@@ -538,8 +559,10 @@ function estimateRawScore(scoredObservations) {
   const weightedCorrect = scoredObservations.reduce((acc, o) => acc + o.weight * o.u, 0);
   const estimate = weightedCorrect / totalWeight;
 
-  const nEff = totalWeight;
-  const pTilde = (weightedCorrect + 2) / (nEff + 4);
+  const sumSquaredWeight = scoredObservations.reduce((acc, o) => acc + o.weight * o.weight, 0);
+  const nEff = (totalWeight * totalWeight) / sumSquaredWeight;
+
+  const pTilde = (nEff * estimate + 2) / (nEff + 4);
   const variance = (pTilde * (1 - pTilde)) / (nEff + 4);
   const sd = Math.sqrt(Math.max(variance, 0));
 
@@ -713,7 +736,40 @@ export function accumulateEvidence(session, db, options = {}) {
        started before a recalibration finished). Neither is silently
        averaged over -- both are refused explicitly, for the same reason
        the original mixed-parameterSetId check existed: a single posterior
-       over evidence measured two different ways is not interpretable. */
+       over evidence measured two different ways is not interpretable.
+
+       Day 39 (adversarial review, P2-9 and P2-10 -- both KNOWN, both
+       DEFERRED rather than fixed, documented here on purpose rather than
+       silently left):
+
+       P2-9: `effectiveSource` returns `null` for a response with neither
+       `parameterSource` nor `parameterSetId` at all (fully untagged, hand-
+       edited or otherwise malformed data -- distinct from the "predating
+       this field" case immediately above, which always has a
+       `parameterSetId`). `.filter(Boolean)` then drops that `null` from
+       `parameterSources` entirely, so an untagged response is silently
+       absorbed into whatever source the rest of the group resolves to
+       instead of being flagged as its own ambiguous source. Low blast
+       radius (this shape of response should not occur post-migration) and
+       fixing it well means choosing new refusal UX for a fourth kind of
+       "source", so it is left as a known gap rather than rushed in.
+
+       P2-10: a raw-score (CTT/sum/threshold) response scored before this
+       field existed also has `effectiveSource(r) === null` (no
+       `parameterSetId` either -- raw-score has never used one), so a
+       GROUP consisting ENTIRELY of such legacy responses falls through to
+       `parameterSources.length === 0` and hits the final ambiguous-
+       source refusal below, even though raw-score families need no
+       parameterSource at all to be resolved unambiguously. Reachable only
+       for a session with multiple Evidence Models where one receives a
+       response after this deploy and another has only pre-deploy raw-
+       score responses; non-fatal (a spurious `supported: false` entry for
+       that one Evidence Model, not a blocked submission) and the window
+       shrinks as old sessions close out. Left deferred for the same
+       reason as P2-9: fixing it requires first computing the Evidence
+       Model's family before this grouping step so a legacy raw-score
+       response can default to `"not-applicable"` rather than `null`,
+       which is a larger reordering than this pass's other fixes. */
     const effectiveSource = (r) => r.parameterSource || (r.parameterSetId ? "calibrated" : null);
     const parameterSources = [...new Set(group.map(effectiveSource).filter(Boolean))];
 
@@ -922,18 +978,25 @@ export function accumulateEvidence(session, db, options = {}) {
       }
 
       /* Day 38: a PILOT-sourced group has no parameterSet at all -- its
-         numbers live on the item that produced the response
-         (`item.psychometrics.irtParams`, Item Wizard Step 7), not on the
-         Evidence Model. A CALIBRATED (or legacy) group is unchanged: the
-         parameter set's own `parameters[observableId]` map, exactly as
-         before Day 38. */
+         numbers live on the RESPONSE itself (`r.pilotParams`), a snapshot
+         `sessionRoutes.js` took of the item's pilot
+         `psychometrics.irtParams` (Item Wizard Step 7) at the moment this
+         response was scored -- Day 39 (adversarial review, P0-3). Reading
+         the item's CURRENT pilot values here instead (as a first pass did)
+         let an author's later edit to an item's pilot a/b silently rewrite
+         every past session's historical posterior on its next accumulation
+         pass, since this function recomputes from `session.responses` on
+         every call. `r.pilotParams` absent on an older response (scored
+         before Day 39) is handled the same as any other missing-parameters
+         case below -- excluded with a warning, not a crash. A CALIBRATED
+         (or legacy) group is unchanged: the parameter set's own
+         `parameters[observableId]` map, exactly as before Day 38. */
       let params;
       let sourceLabel;
 
       if (parameterSource === "pilot") {
-        const item = (db.items || []).find((it) => it.id === r.itemId);
-        params = item?.psychometrics?.irtParams;
-        sourceLabel = `item '${r.itemId}''s pilot psychometrics.irtParams`;
+        params = r.pilotParams;
+        sourceLabel = `response for item '${r.itemId}''s pinned pilot parameters`;
       } else {
         params = parameterSet?.parameters?.[r.observableId];
         sourceLabel = `parameter set '${parameterSetId}'`;
@@ -1006,7 +1069,67 @@ export function accumulateEvidence(session, db, options = {}) {
          uncertainty. Callers that report an estimate to a human should
          say so. */
       boundaryLimited: result.boundaryLimited === true,
+      // Day 39 (adversarial review, P2-8): was computed by
+      // estimateWithAdaptiveGrid but never copied onto the pushed
+      // posterior, so applyPosteriorsToSession's `posterior.refined ===
+      // true` read always saw `undefined` and every persisted posterior
+      // silently reported `refined: false` -- a diagnostic that exists
+      // specifically to distinguish the coarse-pass grid from the
+      // posterior-adaptive REFINEMENT pass (see estimateWithAdaptiveGrid's
+      // own REFINEMENT comment) was permanently uninformative.
+      refined: result.refined === true,
     });
+  }
+
+  /* Day 39 (adversarial review, P0-1): a Student Model Variable can be
+     targeted by more than one Evidence Model on the same competency model
+     (e.g. two unidimensional Evidence Models both resolving to the
+     session's one continuous SMV, via resolveSmVariable's own documented
+     fallback). Grouping is per-EVIDENCE-MODEL above, so each such group
+     independently computes and pushes ITS OWN "supported: true" posterior
+     for the SAME smvId -- and applyPosteriorsToSession persists by smvId
+     alone (schema.js's smvPosteriors is an object keyed by smvId), so
+     whichever group happens to come last in Map insertion order silently
+     OVERWRITES the other's posterior, with no warning and no trace beyond
+     `responsesUsed` under-counting the session's real response total.
+     Measured: two Evidence Models scored 4-correct/4-incorrect on
+     identical items persisted +1.15 or -1.15 depending purely on which
+     group iterated last, when the honest joint answer is 0.
+
+     attributeAccumulation.js already refuses the analogous collision for a
+     duplicated Q-matrix attribute (`duplicateAttribute`, "the second
+     silently overwrites the first") -- this applies that same doctrine
+     here: any smvId claimed by more than one SUPPORTED posterior is
+     refused for ALL of the colliding groups, rather than silently letting
+     one win. Pooling the evidence across Evidence Models into a single
+     joint posterior would be the more complete fix, but is a real
+     redesign of the per-evidence-model grouping above; refusing is the
+     conservative, correct-over-convenient choice until that redesign
+     happens -- an honest "not computed" is always safer than a
+     confidently wrong number, which is this whole file's standing rule. */
+  const supportedBySmvId = new Map();
+  for (const p of posteriors) {
+    if (!p.supported || !p.smvId) continue;
+    if (!supportedBySmvId.has(p.smvId)) supportedBySmvId.set(p.smvId, []);
+    supportedBySmvId.get(p.smvId).push(p);
+  }
+
+  for (const [smvId, claimants] of supportedBySmvId) {
+    if (claimants.length <= 1) continue;
+
+    const evidenceModelIds = [...new Set(claimants.map((c) => c.evidenceModelId))];
+    const reason = `Student Model Variable '${smvId}' is targeted by ${evidenceModelIds.length} different Evidence Models in this session's responses (${evidenceModelIds.join(", ")}), which would each compute their own posterior for the same variable. Persisting either one would silently discard the other's evidence, so neither is reported as supported.`;
+
+    for (const claimant of claimants) {
+      claimant.supported = false;
+      claimant.reason = reason;
+      delete claimant.estimate;
+      delete claimant.precision;
+      delete claimant.sem;
+      delete claimant.method;
+      delete claimant.boundaryLimited;
+      delete claimant.refined;
+    }
   }
 
   return { posteriors, warnings };

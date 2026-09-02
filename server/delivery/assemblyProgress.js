@@ -54,19 +54,31 @@ export function resolveAssemblyProgress(posteriors, db) {
     };
 
     /* A SEM target is only comparable to a precision on the SAME scale.
-       The continuous branch reports a posterior SD in theta units; the
-       attribute-mastery branch reports sqrt(p(1-p)), which is bounded by
-       0.5 and means something entirely different. Comparing the two would
-       mark an attribute "measured precisely enough" purely because a
-       probability's SD cannot exceed 0.5 -- schema.js already forbids
-       authoring requiredSEM on a non-continuous SMV, so this is a
-       defence against a record whose SMV type changed after the Assembly
-       Model was written (`update` does not revalidate), not a routine
-       path. Flagged by the Day 36 adversarial review. */
-    if (Number.isFinite(target.requiredSEM) && posterior.smvType && posterior.smvType !== "continuous") {
+       The continuous IRT/Rasch (EAP) branch reports a posterior SD in
+       theta units; the attribute-mastery branch reports sqrt(p(1-p)),
+       which is bounded by 0.5 and means something entirely different.
+       Comparing the two would mark an attribute "measured precisely
+       enough" purely because a probability's SD cannot exceed 0.5 --
+       schema.js already forbids authoring requiredSEM on a non-continuous
+       SMV, so this is a defence against a record whose SMV type changed
+       after the Assembly Model was written (`update` does not
+       revalidate), not a routine path. Flagged by the Day 36 adversarial
+       review.
+
+       Day 39 (adversarial review, P1-6): gated on `posterior.smvType`
+       originally, but the scale mismatch this guards against comes from
+       the MODEL FAMILY, not the SMV type. RAW_SCORE_SMV_TYPES
+       (evidenceAccumulation.js) explicitly allows a CTT/sum/threshold
+       model on a `continuous` SMV -- `posterior.smvType === "continuous"`
+       in that case, so the old check let a raw-score proportion's SE
+       (bounded by 0.5, same scale problem as attribute mastery) straight
+       through the comparison it exists to block. Gated on `method`
+       instead: only the EAP branch's posterior SD is on the theta scale a
+       requiredSEM target is defined against. */
+    if (Number.isFinite(target.requiredSEM) && posterior.method !== "eap") {
       entry.requiredSEM = target.requiredSEM;
       entry.stoppingCriterionMet = null;
-      entry.note = `A requiredSEM target is defined on the theta scale and cannot be compared to a '${posterior.smvType}' Student Model Variable's precision.`;
+      entry.note = `A requiredSEM target is defined on the theta scale and cannot be compared to a '${posterior.modelFamily}' model's precision (method: '${posterior.method}').`;
     } else if (Number.isFinite(target.requiredSEM)) {
       entry.requiredSEM = target.requiredSEM;
       entry.stoppingCriterionMet = posterior.precision <= target.requiredSEM;

@@ -436,6 +436,38 @@ describe("parameter validation — degenerate calibrations are refused, not cons
     expect(gdinaTableIsMonotonic([0.1, 0.9, 0.5, 0.6], 2)).toBe(false);
   });
 
+  // Day 39 (adversarial review, P2-7): for m = 2 required attributes,
+  // graded-lex order (the table's actual row order -- see
+  // REDUCED_PATTERN_ORDER) and a plain little-endian binary counter
+  // happen to coincide, which is why the m = 2 test above could not have
+  // caught a function that walked `probabilities` as a binary counter
+  // instead of translating through the graded-lex ranking. They diverge
+  // starting at m = 3: index 3 means "third required attribute mastered
+  // alone" (weight 1) in graded-lex order, but means "the first two
+  // attributes both mastered" (weight 2) as a raw bitmask. This table is
+  // genuinely monotonic under the correct (graded-lex) reading --
+  //   weight 0:            idx0 = 0.10
+  //   weight 1 (a0,a1,a2):  idx1 = 0.20, idx2 = 0.18, idx3 = 0.15
+  //   weight 2 (a0a1,a0a2,a1a2): idx4 = 0.50, idx5 = 0.55, idx6 = 0.60
+  //   weight 3:             idx7 = 0.90
+  // every weight-1 entry is below every weight-2 entry, which is below
+  // the weight-3 entry -- but the pre-fix binary-counter version would
+  // compare probabilities[1] (0.20, "a0 alone") against probabilities[3]
+  // (0.15, actually "a2 alone", misread as "a0+a1") and see a decrease,
+  // wrongly reporting this monotonic table as non-monotonic.
+  it("compares the correct pair of rows for m = 3 required attributes, where graded-lex and binary-counter order diverge", () => {
+    const probabilities = [0.10, 0.20, 0.18, 0.15, 0.50, 0.55, 0.60, 0.90];
+    expect(gdinaTableIsMonotonic(probabilities, 3)).toBe(true);
+  });
+
+  it("still detects a genuinely non-monotonic m = 3 table", () => {
+    // Same table as above, but idx5 ("a0+a2 mastered") is dropped below
+    // idx1 ("a0 alone") -- mastering a2 in addition to a0 should never
+    // reduce the probability of success.
+    const probabilities = [0.10, 0.20, 0.18, 0.15, 0.50, 0.05, 0.60, 0.90];
+    expect(gdinaTableIsMonotonic(probabilities, 3)).toBe(false);
+  });
+
   it("reads a bernoulli prior directly and a beta prior through its mean", () => {
     expect(masteryPrior({ id: "a", priorDistribution: { family: "bernoulli", params: { p: 0.3 } } })).toEqual({ p: 0.3 });
     // Beta(2, 6) has mean 2/8 = 0.25.
@@ -551,7 +583,13 @@ describe("accumulateAttributeMastery — the full branch", () => {
     // With attr-b no longer required, a correct answer is stronger
     // evidence for attr-a and no evidence at all about attr-b.
     expect(onlyA[0].estimate).toBeGreaterThan(conjunctive[0].estimate);
-    expect(onlyA[1].estimate).toBeCloseTo(0.5, 12);
+    // Day 39 (adversarial review, P1-4): attr-b is now touched by NO
+    // scored response's Q-vector, so it is refused rather than reported at
+    // the prior it started from -- that used to come back
+    // `supported: true, estimate: 0.5`, indistinguishable from a genuine
+    // measurement that happened to land at 0.5.
+    expect(onlyA[1].supported).toBe(false);
+    expect(onlyA[1].reason).toMatch(/No scored response.*required attribute 'attr-b'/);
   });
 
   it("excludes a response whose item has no calibrated parameters, with a warning", () => {
@@ -722,8 +760,13 @@ describe("accumulateEvidence — dina/gdina reach the attribute branch end to en
     const { posteriors } = accumulateEvidence(session, diagnosticDb("gdina"));
 
     expect(posteriors).toHaveLength(2);
-    expect(posteriors.every((p) => p.supported)).toBe(true);
+    // Day 39 (adversarial review, P1-4): only i1 was answered, and i1's
+    // Q-vector only requires attr-a (diagnosticDb's i2, the item that
+    // requires attr-b, was never submitted) -- so attr-b is correctly
+    // refused, not reported at its untouched prior.
+    expect(posteriors.find((p) => p.smvId === "attr-a").supported).toBe(true);
     expect(posteriors.find((p) => p.smvId === "attr-a").modelFamily).toBe("gdina");
+    expect(posteriors.find((p) => p.smvId === "attr-b").supported).toBe(false);
   });
 
   it("is deterministic and reproducible from the stored responses alone", () => {

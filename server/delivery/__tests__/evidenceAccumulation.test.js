@@ -836,6 +836,174 @@ describe("accumulateEvidence — reproducibility", () => {
   });
 });
 
+describe("accumulateEvidence — Day 39 (adversarial review) regression tests", () => {
+  it("P0-1: refuses BOTH posteriors, rather than one silently overwriting the other, when two Evidence Models target the same SMV", () => {
+    // Two distinct Evidence Models, each with their own parameter set, both
+    // pointed at the SAME (only) continuous SMV on cm1. Before the Day 39
+    // fix, `posteriors` would simply contain two entries for smvId
+    // "smv-theta" -- and any downstream consumer keyed by smvId (e.g.
+    // applyPosteriorsToSession's `smvPosteriors` map) would keep whichever
+    // one it happened to process last, silently discarding the other's
+    // evidence. The fix adds a post-pass that detects the collision and
+    // marks every claimant unsupported instead of picking a "winner".
+    const db = makeDb({
+      evidenceModels: [
+        {
+          id: "em1",
+          competencyId: "c1",
+          versionNumber: 1,
+          observables: [{ id: "o1", evidenceRule: { direction: "supports", strengthLevel: 4 } }],
+          statisticalModels: [{
+            id: "sm1",
+            type: "irt",
+            active: true,
+            structureConfig: {},
+            parameterSets: [{
+              parameterSetId: "ps1",
+              parameters: { o1: { a: 1, b: 0 } },
+              packageVersion: "pilot-1",
+              converged: true,
+              sampleSize: 500,
+              calibratedAt: "2026-01-01T00:00:00.000Z",
+            }],
+            activeParameterSetId: "ps1",
+          }],
+        },
+        {
+          id: "em2",
+          competencyId: "c1",
+          versionNumber: 1,
+          observables: [{ id: "o2", evidenceRule: { direction: "supports", strengthLevel: 4 } }],
+          statisticalModels: [{
+            id: "sm2",
+            type: "irt",
+            active: true,
+            structureConfig: {},
+            parameterSets: [{
+              parameterSetId: "ps2",
+              parameters: { o2: { a: 1, b: 0 } },
+              packageVersion: "pilot-1",
+              converged: true,
+              sampleSize: 500,
+              calibratedAt: "2026-01-01T00:00:00.000Z",
+            }],
+            activeParameterSetId: "ps2",
+          }],
+        },
+      ],
+    });
+
+    const { posteriors } = accumulateEvidence(
+      sessionWith([
+        makeResponse({ itemId: "i1", evidenceModelId: "em1", parameterSetId: "ps1", observationId: "o1", observableId: "o1", activated: true }),
+        makeResponse({ itemId: "i2", evidenceModelId: "em2", parameterSetId: "ps2", observationId: "o2", observableId: "o2", activated: false }),
+      ]),
+      db
+    );
+
+    expect(posteriors).toHaveLength(2);
+    for (const p of posteriors) {
+      expect(p.smvId).toBe("smv-theta");
+      expect(p.supported).toBe(false);
+      expect(p.reason).toMatch(/is targeted by 2 different Evidence Models/);
+      expect(p.reason).toMatch(/em1/);
+      expect(p.reason).toMatch(/em2/);
+      expect(p).not.toHaveProperty("estimate");
+      expect(p).not.toHaveProperty("precision");
+    }
+  });
+
+  it("P0-1: does not refuse when only one Evidence Model resolves to the SMV, even alongside an unrelated unsupported posterior", () => {
+    // Guards against an overly-broad collision check that fires whenever
+    // more than one posterior exists at all, rather than only when they
+    // share the same smvId.
+    const db = makeDb();
+    db.competencyModels[0].smVariables = [
+      continuousSmv({ id: "theta-a" }),
+      continuousSmv({ id: "theta-b" }),
+    ];
+    // No smvId binding -> the single-response group for "theta-a"/"theta-b"
+    // ambiguity path isn't what's under test here; instead, bind explicitly
+    // so em1 resolves cleanly to theta-a, and leave db with only one
+    // Evidence Model so there is nothing to collide with.
+    db.evidenceModels[0].statisticalModels[0].structureConfig = { smvId: "theta-a" };
+
+    const { posteriors } = accumulateEvidence(sessionWith([makeResponse()]), db);
+
+    expect(posteriors).toHaveLength(1);
+    expect(posteriors[0].supported).toBe(true);
+    expect(posteriors[0].smvId).toBe("theta-a");
+  });
+
+  it("P0-3: a response's persisted posterior is unaffected by a LATER edit to the item's pilot psychometrics.irtParams", () => {
+    // sessionRoutes.js snapshots the item's pilot irtParams onto the
+    // response itself (`r.pilotParams`) at submit time. This test exercises
+    // that pinned snapshot directly at the accumulation layer: a pilot-
+    // sourced response must be scored from `r.pilotParams`, never by
+        // looking up the item's CURRENT pilot params, so that editing an
+    // item after scoring cannot rewrite history the next time this
+    // function recomputes from `session.responses` (which happens on
+    // every accumulation pass, since nothing here is incrementally
+    // updated).
+    const db = makeDb();
+    // No parameterSets at all -- a genuinely pilot-only Evidence Model.
+    db.evidenceModels[0].statisticalModels[0].parameterSets = [];
+    db.evidenceModels[0].statisticalModels[0].activeParameterSetId = null;
+
+    const pinnedParams = { a: 1, b: 0 };
+    const response = makeResponse({
+      parameterSetId: undefined,
+      parameterSource: "pilot",
+      pilotParams: pinnedParams,
+    });
+
+    const before = accumulateEvidence(sessionWith([response]), db).posteriors[0];
+    expect(before.supported).toBe(true);
+    expect(before.parameterSource).toBe("pilot");
+
+    // Simulate "the item's pilot params were edited after this response was
+    // scored" -- nothing on the stored response changes, only what a fresh
+    // lookup of the item's current psychometrics would return. Because
+    // accumulateEvidence never performs such a lookup for a pilot-sourced
+    // group, mutating a hypothetical "current" params object here (which
+    // this module never even sees) cannot move the estimate: re-running
+    // with the SAME stored response must reproduce the SAME posterior.
+    const after = accumulateEvidence(sessionWith([response]), db).posteriors[0];
+
+    expect(after.estimate).toBe(before.estimate);
+    expect(after.precision).toBe(before.precision);
+
+    // And explicitly: if the response's OWN pinned snapshot differs (as it
+    // would for a response scored against different pilot params), the
+    // posterior DOES move -- proving the snapshot, not some external state,
+    // is what actually drives the estimate.
+    const differentPin = makeResponse({
+      parameterSetId: undefined,
+      parameterSource: "pilot",
+      pilotParams: { a: 3, b: -2.5 },
+    });
+    const withDifferentPin = accumulateEvidence(sessionWith([differentPin]), db).posteriors[0];
+
+    expect(withDifferentPin.estimate).not.toBe(before.estimate);
+  });
+
+  it("P0-3: excludes (with a warning), rather than crashing, a pilot-sourced response with no pinned pilotParams", () => {
+    // An older response scored before Day 39 would have parameterSource
+    // "pilot" but no pilotParams field at all -- this must degrade to the
+    // ordinary "no usable parameters" exclusion path, not a TypeError.
+    const db = makeDb();
+    db.evidenceModels[0].statisticalModels[0].parameterSets = [];
+    db.evidenceModels[0].statisticalModels[0].activeParameterSetId = null;
+
+    const response = makeResponse({ parameterSetId: undefined, parameterSource: "pilot" });
+
+    const { posteriors, warnings } = accumulateEvidence(sessionWith([response]), db);
+
+    expect(posteriors[0].supported).toBe(false);
+    expect(warnings.join(" ")).toMatch(/pinned pilot parameters.*no parameters for observable 'o1'/);
+  });
+});
+
 
 /* ==================================================================
    SECOND ADVERSARIAL PASS — over the grid-sizing fixes themselves.
@@ -1202,12 +1370,31 @@ describe("estimateRawScore — the CTT/sum/threshold arithmetic, hand-computed",
   it("two responses with UNEQUAL weight (threshold-style): hand-computed", () => {
     // weight 1 correct, weight 3 incorrect.
     //   totalWeight = 4, weightedCorrect = 1*1 + 3*0 = 1, estimate = 0.25
-    //   pTilde = (1 + 2) / (4 + 4) = 3/8 = 0.375
-    //   variance = 0.375 * 0.625 / 8 = 0.234375 / 8 = 0.029296875
-    //   sd = sqrt(0.029296875) = 0.1711632992203644...
+    //
+    // Day 39 (adversarial review, P0-2): nEff is KISH'S effective sample
+    // size (Sw)^2 / S(w^2), not the raw weight sum -- see estimateRawScore's
+    // own updated header comment for why using Sw directly froze the
+    // reported SE regardless of how many responses were actually scored.
+    //   sumSquaredWeight = 1^2 + 3^2 = 10
+    //   nEff = 4^2 / 10 = 1.6
+    //   pTilde = (1.6 * 0.25 + 2) / (1.6 + 4) = 2.4 / 5.6 = 0.42857142857142855
+    //   variance = 0.42857142857142855 * 0.5714285714285714 / 5.6 = 0.043731778425655975
+    //   sd = sqrt(0.043731778425655975) = 0.20912144420325712...
     const result = estimateRawScore([{ u: 1, weight: 1 }, { u: 0, weight: 3 }]);
     expect(result.estimate).toBeCloseTo(0.25, 15);
-    expect(result.sd).toBeCloseTo(0.1711632992203644, 15);
+    expect(result.sd).toBeCloseTo(0.20912144420325712, 15);
+  });
+
+  it("Day 39 (P0-2): a UNIFORM weight (including 1/n, the schema-required Task Model shape) reduces nEff to exactly the response count, so precision improves as more responses accumulate", () => {
+    const five = estimateRawScore(Array.from({ length: 5 }, () => ({ u: 1, weight: 1 / 5 })));
+    const twenty = estimateRawScore(Array.from({ length: 20 }, () => ({ u: 1, weight: 1 / 20 })));
+    const fifty = estimateRawScore(Array.from({ length: 50 }, () => ({ u: 1, weight: 1 / 50 })));
+
+    // Before the fix, Sw was pinned near 1 by schema.js's "weights sum to
+    // 1" rule for every one of these, so all three reported the SAME sd
+    // regardless of test length -- 50 items looked no more precise than 5.
+    expect(twenty.sd).toBeLessThan(five.sd);
+    expect(fifty.sd).toBeLessThan(twenty.sd);
   });
 
   it("precision improves and estimate approaches the true rate as responses accumulate", () => {
@@ -1312,9 +1499,10 @@ describe("accumulateEvidence — the raw-score family end to end", () => {
     const { posteriors } = accumulateEvidence(sessionWith(responses), db);
 
     expect(posteriors[0].supported).toBe(true);
-    // Same numbers as the hand-computed weight-1/weight-3 fixture above.
+    // Same numbers as the hand-computed weight-1/weight-3 fixture above
+    // (Day 39: updated for the Kish's-nEff fix -- see that test).
     expect(posteriors[0].estimate).toBeCloseTo(0.25, 15);
-    expect(posteriors[0].precision).toBeCloseTo(0.1711632992203644, 15);
+    expect(posteriors[0].precision).toBeCloseTo(0.20912144420325712, 15);
   });
 
   it("excludes a response whose declared weight is invalid, with a warning", () => {

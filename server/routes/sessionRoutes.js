@@ -280,6 +280,22 @@ router.post("/:id/submit", async (req, res) => {
 
     let parameterSetId = null;
     let parameterSource = null;
+    // Day 39 (adversarial review, P0-3): a SNAPSHOT of the pilot IRT
+    // parameters actually used to score THIS response, not a live pointer.
+    // The calibrated path is reproducible-by-design -- `parameterSetId`
+    // pins an immutable, versioned parameterSet, so re-resolving it later
+    // always returns the same numbers (Decision 1 in
+    // evidenceAccumulation.js's header). `item.psychometrics.irtParams` has
+    // no such immutability: it is ordinary, editable Item Wizard Step 7
+    // data, and an author can change it at any time. Without pinning it
+    // here, evidenceAccumulation.js re-reads the item's CURRENT pilot
+    // values on every accumulation pass (it recomputes from
+    // session.responses on every call) -- so editing an item's pilot a/b
+    // silently rewrites every past session's historical posterior, with no
+    // record it moved. Persisting the actual numbers used keeps the pilot
+    // path reproducible from the stored response alone, exactly like the
+    // calibrated path already is.
+    let pilotParams = null;
 
     if (RAW_SCORE_MODEL_FAMILIES.includes(family)) {
       // Never needed a calibrated parameterSet; a weighted proportion over
@@ -289,15 +305,20 @@ router.post("/:id/submit", async (req, res) => {
       parameterSetId = calibratedParameterSetId;
       parameterSource = "calibrated";
     } else if (CONTINUOUS_MODEL_FAMILIES.includes(family)) {
-      const pilotParams = item.psychometrics?.irtParams;
+      const currentPilotParams = item.psychometrics?.irtParams;
 
-      if (!itemParametersAreUsable(pilotParams)) {
+      if (!itemParametersAreUsable(currentPilotParams)) {
         return res.status(400).json({
           error: `Evidence model '${item.evidenceModelId}' has no active calibrated parameter set, and item '${itemId}' carries no usable pilot IRT parameters (psychometrics.irtParams needs at least a > 0 and a finite b) for a '${family}' model to fall back on.`,
         });
       }
 
       parameterSource = "pilot";
+      pilotParams = {
+        a: currentPilotParams.a,
+        b: currentPilotParams.b,
+        ...(Number.isFinite(currentPilotParams.c) ? { c: currentPilotParams.c } : {}),
+      };
     } else {
       return res.status(400).json({
         error: `Evidence model '${item.evidenceModelId}' has no active calibrated parameter set yet; item '${itemId}' cannot be scored through it. Pilot parameters are not yet supported for the '${family}' family.`,
@@ -339,6 +360,9 @@ router.post("/:id/submit", async (req, res) => {
       evidenceModelVersion: evidenceModelRecord.versionNumber,
       parameterSetId,
       parameterSource,
+      // Only present for parameterSource "pilot" -- the snapshot pin, see
+      // the comment above this block.
+      ...(pilotParams ? { pilotParams } : {}),
       rawAnswer: rawAnswer ?? null,
       observationId: evidence.observationId,
       observableId: evidence.observableId,
@@ -404,10 +428,25 @@ router.post("/:id/submit", async (req, res) => {
     // pattern immediately above: a bookkeeping failure is surfaced, not
     // allowed to fail the request.
     let assemblyProgress = [];
+    // Day 39 (adversarial review, P1-5): accumulateEvidence() returns
+    // `{ posteriors, warnings }` -- `warnings` is how the module reports
+    // every response it had to EXCLUDE from a posterior it otherwise
+    // computed (an uncalibrated observable, unusable IRT parameters, an
+    // unrecognised evidence-rule direction, a missing pilot snapshot...).
+    // Those are exactly the "silent data problem" cases the module's own
+    // design doc calls out as unacceptable to hide. Before this fix,
+    // `accumulation.warnings` was read nowhere -- computed on every submit
+    // and then discarded, so a caller (and the UI) had no way to learn a
+    // posterior was quietly computed from fewer responses than it looked
+    // like. Surfaced here the same way `accumulationNote` already reports a
+    // thrown accumulation error, so both the "crashed" and the "ran but
+    // excluded something" cases are visible on the response.
+    let accumulationWarnings = [];
     try {
       const accumulation = accumulateEvidence(session, db);
       applyPosteriorsToSession(session, accumulation);
       assemblyProgress = resolveAssemblyProgress(accumulation.posteriors, db);
+      accumulationWarnings = accumulation.warnings || [];
     } catch (err) {
       response.accumulationNote = `Evidence accumulation failed: ${err.message}`;
     }
@@ -418,9 +457,10 @@ router.post("/:id/submit", async (req, res) => {
     }
 
     saveDB(db);
-    // `assemblyProgress` is surfaced in the response only -- see its own
-    // module header for why it is never persisted or acted on here.
-    return res.json({ ...session, assemblyProgress });
+    // `assemblyProgress` and `accumulationWarnings` are surfaced in the
+    // response only -- see assemblyProgress.js's own module header for why
+    // neither is ever persisted or acted on here.
+    return res.json({ ...session, assemblyProgress, accumulationWarnings });
   }
 
   // 🔹 Validation: observationId & evidenceId
