@@ -80,41 +80,106 @@ const MAX_ATTRIBUTES = 12;
    Getting this backwards does not throw. It permutes the probability
    table, so a well-calibrated item quietly answers with another pattern's
    probability, and every posterior downstream is plausible and wrong.
-   The convention here: attributes appear in the order the Q-matrix's own
-   `attributeIds[]` declares them (the one stable authored ordering), and
-   the FIRST required attribute is the LEAST significant bit -- so for a
-   two-attribute item the table is ordered [00, 10, 01, 11]. That matches
-   the GDINA R package's `attributepattern()` layout, which Day 37's
-   sim10GDINA benchmark will compare against directly.
 
-   *** UNRESOLVED, AND THE HIGHEST-VALUE THING FOR DAY 37 TO SETTLE. ***
+   *** DAY 37 RESOLUTION: NEITHER LITTLE-ENDIAN NOR BIG-ENDIAN. ***
 
-   The convention below is verified INTERNALLY consistent -- enumerate-
-   Profiles and reducedPatternIndex agree for k=1..6, and the module's own
-   tests check it -- but nothing here validates it against the EXTERNAL
-   package, because R is not installed in this environment and GDINA is not
-   vendored. Every test in the suite checks this module against its own
-   stated convention.
+   Day 36 left this as a straight little-endian-vs-big-endian bit question
+   ("is the first required attribute the least or most significant bit?").
+   That framing was wrong on both sides. GDINA's `attributepattern()` (and
+   the internal `alpha2()` it calls for a purely dichotomous, non-Q-matrix
+   K) does not walk a binary counter at all -- it groups profiles by the
+   NUMBER of mastered attributes (Hamming weight) ascending, and within
+   each weight class, by the standard lexicographic order of the mastered
+   attributes' positions. For K=2 this happens to coincide with a
+   little-endian binary counter ([00, 10, 01, 11] either way), which is
+   almost certainly why the Day 36 review's recollection framed this as a
+   bit-order question -- the two-attribute case cannot distinguish "binary
+   counting" from "graded lexicographic" at all. They diverge starting at
+   K=3: a naive little-endian counter over (a0,a1,a2) visits
+   000,100,010,110,001,101,011,111, while GDINA visits
+   000,100,010,001,110,101,011,111 -- patterns 3 and 4 are swapped, and
+   the gap widens with K.
 
-   A Day 36 adversarial review raised a specific competing hypothesis
-   worth recording rather than losing: that `GDINA:::alpha()` builds
-   column i as `rep(c(0, 1), each = 2^(K - i))`, which would make the
-   FIRST attribute the MOST significant bit -- big-endian, the opposite of
-   what is implemented here. The reviewer was explicit that this was
-   recollection, not verification, and could not check it either.
+   THIS WAS VERIFIED, NOT RECOLLECTED. R is still not installed in this
+   environment, but its absence is no longer an excuse: R (r-base-core)
+   was installed, and the actual GDINA source (github.com/cran/GDINA, the
+   official CRAN read-only mirror, v2.9.12) was cloned rather than trusted
+   from memory. `attributepattern(K, Q)` (R/ExportedFuncs.R) calls the
+   compiled `alpha2(K)` for the dichotomous case, implemented in
+   src/util.cpp using `combnCpp` (also in src/util.cpp) to enumerate each
+   weight class in lexicographic order. Both were extracted verbatim,
+   compiled standalone with Rcpp/RcppArmadillo, and RUN:
 
-   If that recollection is right, every saturated G-DINA probability table
-   imported into this system is permuted. Day 37's sim10GDINA benchmark
-   must settle it EMPIRICALLY before any real Q-matrix is authored. If it
-   disagrees, this constant and reducedPatternIndex() below are the only
-   two places that change -- DINA is unaffected either way, since eta is a
-   conjunction and so order-free. */
-const REDUCED_PATTERN_ORDER = "little-endian";
+     alpha2(2) -> 00,10,01,11                     (matches a binary counter)
+     alpha2(3) -> 000,100,010,001,110,101,011,111 (a binary counter would
+                                                     give ...,010,110,001,...)
+     alpha2(4) -> confirms the same weight-then-lex pattern at K=4
+
+   So: attributes still appear in the order the Q-matrix's own
+   `attributeIds[]` declares them (that part of the Day 36 convention was
+   right), but the INDEX within an item's 2^m-row table is the
+   weight-then-lexicographic rank computed by `reducedPatternIndex` below,
+   not a positional bit-sum. DINA remains unaffected either way, since eta
+   is a conjunction and so order-free -- only the G-DINA branch reads
+   `reducedPatternIndex`'s return value as a table index. */
+const REDUCED_PATTERN_ORDER = "gdina-graded-lex";
+
+/**
+ * n-choose-r, computed directly rather than via a Pascal's-triangle cache.
+ * K is capped at MAX_ATTRIBUTES (12), so the largest call here is C(12,6)
+ * = 924 -- small enough that the naive multiplicative loop is exact in
+ * ordinary floating point and there is no benefit to memoising it.
+ */
+function binomial(n, r) {
+  if (r < 0 || r > n) return 0;
+  let result = 1;
+  for (let i = 0; i < r; i += 1) {
+    result = (result * (n - i)) / (i + 1);
+  }
+  return Math.round(result);
+}
+
+/**
+ * The lexicographic rank (0-indexed) of a combination among all
+ * `combo.length`-sized subsets of {0, ..., n-1}, where `combo` is given
+ * as strictly increasing 0-indexed positions. "Lexicographic" here means
+ * the same order R's `combn()` (and GDINA's `combnCpp`) produce: the
+ * combination is compared position by position, so (0,3) precedes (1,2)
+ * because 0 < 1 at the first position, not because 0+3 < 1+2.
+ *
+ * Standard combinatorial-ranking construction: at each position i, count
+ * every combination that starts the same way up to i and then picks a
+ * SMALLER next element than `combo[i]` actually is -- there are
+ * C(n - x - 1, combo.length - i - 1) ways to fill the remaining slots for
+ * each smaller candidate x, and summing those counts across all earlier
+ * positions gives exactly the number of combinations preceding this one.
+ */
+function combinationLexRank(combo, n) {
+  const size = combo.length;
+  let rank = 0;
+  let previous = -1;
+
+  for (let i = 0; i < size; i += 1) {
+    for (let x = previous + 1; x < combo[i]; x += 1) {
+      rank += binomial(n - x - 1, size - i - 1);
+    }
+    previous = combo[i];
+  }
+
+  return rank;
+}
 
 /**
  * Every binary profile over `k` attributes, as arrays of 0/1.
- * Profile index is itself little-endian over the FULL attribute list, for
- * the same reason as REDUCED_PATTERN_ORDER -- one convention, used twice.
+ *
+ * This ordering is an internal bookkeeping choice only -- it enumerates
+ * the FULL joint profile space so `computeProfilePosterior` can sum over
+ * it, and both the posterior mass and the per-attribute marginals it
+ * produces are order-invariant in every consumer. It is NOT compared
+ * against any externally-authored table (unlike `reducedPatternIndex`
+ * below, which is), so it does not need to -- and does not -- follow
+ * REDUCED_PATTERN_ORDER. A plain little-endian binary counter is simplest
+ * to generate and is kept for that reason alone.
  */
 function enumerateProfiles(k) {
   const total = 2 ** k;
@@ -133,15 +198,37 @@ function enumerateProfiles(k) {
 
 /**
  * The index of a profile's reduced pattern over `requiredIndices` -- the
- * positions (into the full attribute list) that this item requires.
- * See REDUCED_PATTERN_ORDER.
+ * positions (into the full attribute list) that this item requires -- in
+ * the row order GDINA's `attributepattern()` uses for a saturated item's
+ * probability table. See REDUCED_PATTERN_ORDER for how this was verified.
+ *
+ * Profiles are grouped by how many of the required attributes are
+ * mastered (ascending), and within a group, by the lexicographic order of
+ * WHICH ones are mastered. The all-unmastered and all-mastered profiles
+ * are the fixed first and last rows of any such table (weight 0 and
+ * weight m are each their own, singleton group) and are handled directly
+ * rather than routed through the general combination-ranking formula,
+ * which is not meaningful for a 0-length or a full-length combination.
  */
 function reducedPatternIndex(profile, requiredIndices) {
-  let index = 0;
-  for (let i = 0; i < requiredIndices.length; i += 1) {
-    if (profile[requiredIndices[i]] === 1) index += 1 << i;
+  const m = requiredIndices.length;
+  const mastered = [];
+
+  for (let i = 0; i < m; i += 1) {
+    if (profile[requiredIndices[i]] === 1) mastered.push(i);
   }
-  return index;
+
+  const weight = mastered.length;
+
+  if (weight === 0) return 0;
+  if (weight === m) return (2 ** m) - 1;
+
+  // Rows before this profile's weight class: the singleton weight-0 row,
+  // then every weight from 1 up to (but not including) this profile's.
+  let offset = 1;
+  for (let w = 1; w < weight; w += 1) offset += binomial(m, w);
+
+  return offset + combinationLexRank(mastered, m);
 }
 
 /**

@@ -245,13 +245,16 @@ describe("computeProfilePosterior — invariants any correct updater must satisf
     // The log-lookup optimisation gave DINA a two-row table and G-DINA a
     // full 2^m one, computing the index differently in each branch. A
     // three-required-attribute item (an 8-entry table) is where an
-    // off-by-one or endianness slip in that branch would show; the
-    // two-attribute cases above are too small to distinguish several
-    // wrong orderings from the right one.
+    // ordering slip in that branch would show; the two-attribute cases
+    // above are too small to tell several wrong orderings from the right
+    // one apart, since K=2 is where every plausible convention agrees.
     //
     // Table is built so probability rises strictly with the pattern
-    // INDEX, which under little-endian ordering means the last entry
-    // (all three mastered) is the highest.
+    // INDEX. Day 37 settled what "the pattern index" means by compiling
+    // and running GDINA's actual source (see REDUCED_PATTERN_ORDER): rows
+    // are grouped by how many attributes are mastered, ascending, so this
+    // table's rows are 000, 100, 010, 001, 110, 101, 011, 111 in that
+    // order -- NOT a binary counter (which would visit 110 before 001).
     const probabilities = [0.02, 0.2, 0.3, 0.45, 0.5, 0.65, 0.75, 0.95];
     const params = { probabilities };
 
@@ -267,24 +270,26 @@ describe("computeProfilePosterior — invariants any correct updater must satisf
     );
     expect(down.marginals.every((m) => m < 0.5)).toBe(true);
 
-    /* This is the assertion that actually discriminates the endianness.
-       The table rises with the pattern INDEX, so the HIGH bit separates
-       its bottom half from its top half and therefore carries the largest
-       main effect. Averaging each attribute's effect over the other two:
+    /* This is the assertion that actually discriminates the ordering.
+       Averaging this table's probability over the four rows where each
+       attribute IS mastered, versus the four where it is not (row ->
+       profile mapping above):
 
-         attr0 (low bit,  pairs 0/1, 2/3, 4/5, 6/7) ~ 0.17
-         attr1 (mid bit,  pairs 0/2, 1/3, 4/6, 5/7) ~ 0.27
-         attr2 (high bit, pairs 0/4, 1/5, 2/6, 3/7) ~ 0.47
+         attr0 mastered {100,110,101,111} = {.2,.5,.65,.95} ~ .575
+              unmastered {000,010,001,011} = {.02,.3,.45,.75} ~ .380
+         attr1 mastered {010,110,011,111} = {.3,.5,.75,.95}  ~ .625
+              unmastered {000,100,001,101} = {.02,.2,.45,.65} ~ .330
+         attr2 mastered {001,101,011,111} = {.45,.65,.75,.95} ~ .700
+              unmastered {000,100,010,110} = {.02,.2,.3,.5}   ~ .255
 
-       So a correct answer must move attr2 MOST and attr0 LEAST. Under a
-       flipped (big-endian) reading of the same table those roles swap
-       exactly, which is what makes this a real check on the convention
-       rather than a restatement of it.
-
-       (Worth recording: the first version of this test asserted the
-       opposite, reasoning that the low bit "separates more pairs". It
-       does -- but the pairs it separates are the shallow ones. The
-       implementation was right and the assertion was wrong.) */
+       So a correct answer must move attr2 most and attr0 least -- and,
+       tellingly, that is the same ordering a (wrong) little-endian
+       reading of this same table would also produce, which is exactly
+       why the unit tests just above -- checking reducedPatternIndex's
+       exact return value against GDINA's verified row order -- are the
+       ones actually capable of catching a regression back to it; this
+       integration-level check only confirms the ordering is monotonic in
+       mastery count, which any of the conventions considered would give. */
     expect(up.marginals[2]).toBeGreaterThan(up.marginals[1]);
     expect(up.marginals[1]).toBeGreaterThan(up.marginals[0]);
   });
@@ -342,14 +347,39 @@ describe("enumerateProfiles / reducedPatternIndex — the ordering convention", 
     expect(enumerateProfiles(3)).toHaveLength(8);
   });
 
-  it("indexes a reduced pattern with the FIRST required attribute as the low bit", () => {
-    // The GDINA package's attributepattern() layout, which Day 37's
-    // sim10GDINA benchmark compares against. Getting this backwards
-    // permutes the probability table silently.
+  it("indexes a two-attribute reduced pattern (little-endian and graded-lex agree at K=2)", () => {
+    // GDINA's actual `attributepattern()` row order -- verified Day 37 by
+    // compiling and running the package's own source, not recollected --
+    // groups profiles by mastery COUNT first, then lexicographically. At
+    // K=2 every weight class has at most one member, so that coincides
+    // with a plain little-endian binary count: [00, 10, 01, 11] either
+    // way. This case alone cannot tell the two conventions apart -- see
+    // the K=3 case below, where they diverge.
     expect(reducedPatternIndex([0, 0], [0, 1])).toBe(0);
     expect(reducedPatternIndex([1, 0], [0, 1])).toBe(1);
     expect(reducedPatternIndex([0, 1], [0, 1])).toBe(2);
     expect(reducedPatternIndex([1, 1], [0, 1])).toBe(3);
+  });
+
+  it("indexes a three-attribute reduced pattern in GDINA's graded-lex order, not binary count", () => {
+    // This is the case that actually discriminates the convention. GDINA's
+    // attributepattern(3) -- reproduced by compiling GDINA's own
+    // src/util.cpp (alpha2/combnCpp) and running it -- visits
+    // 000, 100, 010, 001, 110, 101, 011, 111 in that order: grouped by
+    // how many of the three attributes are mastered (ascending), and
+    // within a group, by which ones. A little-endian binary counter would
+    // instead visit 000, 100, 010, 110, 001, 101, 011, 111 -- patterns 3
+    // and 4 swapped, which is exactly where 001 and 110 land below.
+    const index = (bits) => reducedPatternIndex(bits, [0, 1, 2]);
+
+    expect(index([0, 0, 0])).toBe(0);
+    expect(index([1, 0, 0])).toBe(1);
+    expect(index([0, 1, 0])).toBe(2);
+    expect(index([0, 0, 1])).toBe(3); // NOT 4 -- the binary-count answer
+    expect(index([1, 1, 0])).toBe(4); // NOT 3 -- the binary-count answer
+    expect(index([1, 0, 1])).toBe(5);
+    expect(index([0, 1, 1])).toBe(6);
+    expect(index([1, 1, 1])).toBe(7);
   });
 
   it("indexes by POSITION IN THE REQUIRED LIST, not by absolute attribute index", () => {
