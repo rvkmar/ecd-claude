@@ -22,7 +22,16 @@ export const rolePermissions = {
       "reports",
       "students",
       "teachers",
-      "users"
+      "users",
+      // D48: declared for the first time. All three collections had schema
+      // and lifecycle validation from Week 4-5 but no route file and no
+      // entry here, so can(role, *, "qMatrixModels") denied for everyone
+      // while nothing served them either -- the same asymmetry the Day 13
+      // RBAC sweep found for `items`, caught this time before a route
+      // shipped rather than after.
+      "qMatrixModels",
+      "assemblyModels",
+      "compositeLibrary"
     ],
     canEdit: [
       "questions",
@@ -33,7 +42,13 @@ export const rolePermissions = {
       "tasks",
       "policies",
       "curricularPolicies",
-      "users"
+      "users",
+      // compositeLibrary is deliberately absent: it is a compiled build
+      // artifact, not an authored entity, and its router exposes no
+      // generic write. Rebuilding is an admin action against the builder,
+      // not an edit of the package's contents.
+      "qMatrixModels",
+      "assemblyModels"
     ],
     canApprove: ["questions", "items"], // promote from review → confirmed
     canDelete: [
@@ -46,7 +61,9 @@ export const rolePermissions = {
       "policies",
       "curricularPolicies",
       "users",
-      "students"
+      "students",
+      "qMatrixModels",
+      "assemblyModels"
     ],
     // "students" was declared in canView but never in canCreate/canDelete
     // on any role, while studentsRoutes.js accepted any authenticated
@@ -66,7 +83,14 @@ export const rolePermissions = {
       "taskModels",
       "tasks",
       "sessions",
-      "reports"
+      "reports",
+      // Read-only: a Q-matrix and an assembly model are system-level
+      // measurement decisions (which attributes a diagnostic model
+      // estimates; when any session built on the spec may stop), not
+      // local authoring. District users need to SEE the spec their
+      // sessions run under without being able to change it.
+      "qMatrixModels",
+      "assemblyModels"
     ],
     canEdit: [
       "tasks",              // can create local tasks

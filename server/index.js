@@ -19,6 +19,13 @@ import policiesRoutes from "./routes/policiesRoutes.js";
 import curricularPoliciesRoutes from "./routes/curricularPoliciesRoutes.js";
 import calibrationRoutes from "./routes/calibrationRoutes.js";
 import usersRoutes from "./routes/usersRoutes.js";
+// D48: the three collections that had schema, lifecycle validators and no
+// HTTP surface at all -- artefacts 4 and 6 of the seven-artefact contract
+// were absent for each. qMatrixModels/assemblyModels are authored and
+// lifecycle-governed; compositeLibrary is a read-only build artifact.
+import qMatrixModelsRoutes from "./routes/qMatrixModelsRoutes.js";
+import assemblyModelsRoutes from "./routes/assemblyModelsRoutes.js";
+import compositeLibraryRoutes from "./routes/compositeLibraryRoutes.js";
 import { authenticateToken, authorizeRole } from "./utils/authMiddleware.js";
 
 const app = express();
@@ -76,6 +83,9 @@ app.use("/api/policies", policiesRoutes);
 app.use("/api/curricularPolicies", curricularPoliciesRoutes);
 app.use("/api/calibrate", calibrationRoutes);
 app.use("/api/users", usersRoutes);
+app.use("/api/qMatrixModels", qMatrixModelsRoutes);
+app.use("/api/assemblyModels", assemblyModelsRoutes);
+app.use("/api/compositeLibrary", compositeLibraryRoutes);
 
 // ------------------------------
 // No static serving here! Nginx handles frontend build

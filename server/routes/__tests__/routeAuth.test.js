@@ -33,6 +33,12 @@ const PROTECTED_ROUTERS = [
   { name: "studentsRoutes", path: "/api/students", importer: () => import("../studentsRoutes.js") },
   { name: "policiesRoutes", path: "/api/policies", importer: () => import("../policiesRoutes.js") },
   { name: "calibrationRoutes", path: "/api/calibrate", importer: () => import("../calibrationRoutes.js") },
+  // D48: the three collections that had schema and lifecycle validation
+  // but no HTTP surface at all. They join this list on the day their
+  // routers are created, so the gate can never be removed silently.
+  { name: "qMatrixModelsRoutes", path: "/api/qMatrixModels", importer: () => import("../qMatrixModelsRoutes.js") },
+  { name: "assemblyModelsRoutes", path: "/api/assemblyModels", importer: () => import("../assemblyModelsRoutes.js") },
+  { name: "compositeLibraryRoutes", path: "/api/compositeLibrary", importer: () => import("../compositeLibraryRoutes.js") },
 ];
 
 describe.each(PROTECTED_ROUTERS)(
