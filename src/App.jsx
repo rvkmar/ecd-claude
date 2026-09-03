@@ -26,7 +26,6 @@ import SessionBuilder from "./components/sessions/SessionBuilder";
 import SessionPlayer from "./components/sessions/SessionPlayer";
 
 import Footer from "./components/ui/Footer";
-// import Toast from "./components/ui/Toast";
 // import NavBar from "./components/ui/NavBar";
 
 export default function App() {
@@ -52,6 +51,17 @@ export default function App() {
     <Router>
       <AuthProvider>
         <TopBar />
+          {/* Day 43 (Week 9, Build Reference Part 5.2's own example: "a
+              toast dropping the one sentence saying what to do"): every
+              toast.error(...) across ~30 files and 100+ call sites was
+              inheriting react-hot-toast's default ariaProps
+              (role="status"/aria-live="polite") and the same fixed 3s
+              duration as a success toast -- an error, which a screen
+              reader user needs announced assertively and a sighted user
+              needs enough time to actually read and act on, was getting
+              neither. Fixed centrally, here, once: react-hot-toast's
+              per-type toastOptions apply to every existing toast.error()
+              call site with no changes to any of them. */}
           <Toaster
             position="bottom-center"
             toastOptions={{
@@ -59,6 +69,13 @@ export default function App() {
               style: {
                 marginBottom: "64px",
                 textAlign: "center",
+              },
+              success: {
+                ariaProps: { role: "status", "aria-live": "polite" },
+              },
+              error: {
+                ariaProps: { role: "alert", "aria-live": "assertive" },
+                duration: 6000,
               },
             }}
           />

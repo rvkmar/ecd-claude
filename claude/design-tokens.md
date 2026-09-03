@@ -53,7 +53,7 @@ Part 5.4 calls for ten shared primitives. An audit of `src/components/ui/` found
 | Component | Status |
 |---|---|
 | Button, Input, Select, Tabs, Table, Badge, Card | ✅ exist (shadcn, `.tsx`, new-york style, `src/components/ui/*.tsx`) |
-| Toast | ⚠️ exists but as a bespoke 10-line component, not the shadcn/Radix pattern the rest of `ui/` follows — accessibility audit scheduled Day 43 |
+| Toast | ✅ **correction (Day 43):** Day 41 misidentified `src/components/ui/Toast.jsx` as the active-but-bespoke toast implementation. It was dead code — zero real importers, only a stale commented-out `import` in `App.jsx` — while `react-hot-toast`'s `<Toaster />`, mounted globally in `App.jsx`, is the actual system already driving 100+ `toast.success`/`toast.error` call sites across ~30 files. Deleted the dead file Day 43; see the Day 43 writeup for the real accessibility fix, applied to the actual system. |
 | Dialog | ✅ added Day 42 (`src/components/ui/dialog.tsx`, `@radix-ui/react-dialog`) |
 | Combobox | ✅ added Day 42 (`src/components/ui/combobox.tsx`, composed from new `popover.tsx` + `command.tsx`, matching shadcn's own documented pattern — there is no standalone "combobox" registry entry) |
 

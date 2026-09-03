@@ -148,3 +148,6 @@ vite.config.ts.timestamp-*
 /data/db.json
 /backups/
 migrations.log.json
+
+*storybook.log
+storybook-static
