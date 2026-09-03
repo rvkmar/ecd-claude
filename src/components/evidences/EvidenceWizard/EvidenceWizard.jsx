@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
-import WizardSidebar from "./WizardSidebar";
-import WizardStepContainer from "./WizardStepContainer";
+import WizardSidebar from "@/components/wizard/WizardSidebar";
+import WizardStepContainer from "@/components/wizard/WizardStepContainer";
 import ErrorBoundary from "@/components/ui/ErrorBoundary";
 import { apiFetch, apiErrorMessage } from "@/api/apiClient";
 import { useAuth } from "@/auth/AuthProvider";
@@ -267,10 +267,12 @@ export default function EvidenceWizard({ onCancel, onSaved, readOnly = false }) 
       <WizardSidebar
         steps={STEPS}
         currentStepIndex={currentStepIndex}
-        stepValidity={stepValidity}
-        goToStep={goToStep}
+        onStepClick={goToStep}
         locked={isLocked}
         status={draftModel.status}
+        title="Evidence Model Wizard"
+        brandInitial="E"
+        footerLabel="Evidence Layer"
       />
 
       <WizardStepContainer
@@ -288,6 +290,8 @@ export default function EvidenceWizard({ onCancel, onSaved, readOnly = false }) 
         onSaveAndReview={handleSaveAndReview}
         onConfirm={handleConfirm}
         onReturnToDraft={handleReturnToDraft}
+        modelLabel="Evidence Model"
+        adaptiveCancelLabel
       >
         <ErrorBoundary
           resetKey={currentStepIndex}

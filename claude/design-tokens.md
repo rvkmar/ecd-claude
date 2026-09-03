@@ -78,9 +78,25 @@ defects.
 
 ## The wizard shell (Day 44)
 
-Not a token, but the largest single item in Part 5.4: `WizardSidebar.jsx` (~200-250 lines) and
-`WizardStepContainer.jsx` (~315-413 lines) are duplicated near-identically three times — once
-each under `CompetencyWizard/`, `EvidenceWizard/`, `TaskWizard/` — each with its own copy of the
-status-colour map, step-state logic, and save/lock/cancel gating. `ItemWizard/` is built on a
-different pattern entirely and is a named, deferred gap (not part of Day 44's extraction). See the
-D44 calendar event and `claude/day45-...md` (once written) for the full account.
+Not a token, but the largest single item in Part 5.4. The Day 41 audit assumed
+`WizardSidebar.jsx`/`WizardStepContainer.jsx` were duplicated near-identically three times
+(Competency/Evidence/Task). A line-by-line Day 44 diff found that was only two-thirds true:
+Competency's and Evidence's pairs really were byte-identical apart from two cosmetic differences
+(an adaptive Cancel/OK label, and the model name in the locked-notice text) plus prop-naming
+conventions (1-based `currentStep`/`step.id` vs 0-based `currentStepIndex`/index) — a safe,
+low-risk merge. Task Model's pair is not a styling variant of the same component: it reads from
+`useTaskModelWizard()` context instead of props, bakes in a materially stricter/different
+navigation-gating rule (forward rail-clicks are never allowed, only `Next`), renders an extra
+per-step "outstanding readiness work" indicator neither other wizard has, and its
+`WizardStepContainer` doubles as the step router (importing/switching `Step1..Step8` itself)
+rather than just rendering externally-provided `children`.
+
+Scope was narrowed accordingly, mirroring the same audit-before-build correction pattern as Days
+41 and 43: extracted and shared `src/components/wizard/WizardSidebar.jsx` +
+`WizardStepContainer.jsx` (using the Day 41 `wizard-rail`/`wizard-rail-collapsed` tokens),
+re-pointed **Competency and Evidence only**, with their two cosmetic differences preserved as
+`adaptiveCancelLabel`/`modelLabel` props rather than picked-a-winner-and-changed-behavior. Task
+Model's (and Item's — already a known, differently-structured 4th wizard) re-pointing is
+explicitly deferred: reconciling its context-driven architecture and step-routing responsibility
+into this shell is a real, separately-scoped piece of work, not a Day 44 styling pass. See
+`claude/day44-wizard-shell.md` for the full account.

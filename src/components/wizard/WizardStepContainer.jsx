@@ -1,18 +1,33 @@
-// CompetencyWizard/WizardStepContainer.jsx
-// 🧩 Wizard Step Container (Canonical Wizard Chrome — Enterprise Visual System)
+// components/wizard/WizardStepContainer.jsx
+// 🧩 Shared Wizard Step Container (Day 44 — Part 5.4 wizard shell)
 // ------------------------------------------------------------
-// This is the shared visual/behavioral template all four model
-// wizards (Competency / Evidence / Task Model / Item) follow:
-//  • Nav bar (Cancel, step indicator + progress rail, Back/Next/
-//    Confirm) pinned to the TOP of the step content, not the bottom.
-//  • The final step swaps Next for Save (draft) or Lock &
-//    Confirm (reviewed) -- see the nav block below.
-//  • No mid-wizard "Save Draft" button -- Next silently persists the
-//    draft first (see CompetencyWizard.jsx's goNext); Confirm does
-//    the same if anything changed since the last auto-save.
-//  • Cancel governance with unsaved-change protection.
-//  • Fully controlled by external state (no duplicated lifecycle
-//    state) -- Tailwind UI.
+// Extracted from competencies/CompetencyWizard/WizardStepContainer.jsx and
+// evidences/EvidenceWizard/WizardStepContainer.jsx. A Day 44 line-by-line
+// diff found exactly two behavioral differences between them, both now
+// parameterised below rather than hardcoded:
+//   1. The Cancel button: Competency always shows the X icon + "Cancel".
+//      Evidence swaps to a plain "OK" (no icon) once the model is no longer
+//      editable. Preserved via `adaptiveCancelLabel`.
+//   2. The locked-model notice names the model type ("This Competency
+//      Model is confirmed and locked." / "This Evidence Model..."). Preserved
+//      via `modelLabel`.
+// Everything else -- the nav bar layout, the Next/Save/Return-to-draft/
+// Lock & Confirm button set and their gating, the discard-changes modal --
+// was byte-identical and is unified as-is.
+//
+// Task Model's step container (taskModels/TaskWizard/WizardStepContainer.jsx)
+// is deliberately NOT folded in here (see WizardSidebar.jsx's header
+// comment for the matching sidebar decision). It takes almost no props,
+// pulling draft/step state from `useTaskModelWizard()` context instead, and
+// it doubles as the step ROUTER -- it imports and switches between
+// Step1Identity..Step8Review itself, where Competency/Evidence's containers
+// just render externally-provided `children`. Its lifecycle button set also
+// differs (a named blocking-reason toast, a `Saving…` progress label tied to
+// its own save flow). Reconciling that would mean either changing Task
+// Model's context/data-flow architecture as a side effect of a shell
+// extraction, or growing this shared component a second, incompatible
+// calling convention -- both out of scope for Day 44. See
+// claude/day44-wizard-shell.md.
 // ------------------------------------------------------------
 
 import React, { useState } from "react";
@@ -33,6 +48,8 @@ export default function WizardStepContainer({
     onSaveAndReview,
     onConfirm,
     onReturnToDraft,
+    modelLabel = "Model",
+    adaptiveCancelLabel = false,
     children,
 }) {
     const [saving, setSaving] = useState(false);
@@ -50,7 +67,7 @@ export default function WizardStepContainer({
 
     /* =====================================================
        🔹 NEXT (silently auto-saves via the onNext prop, which
-       already wraps saveDraft() -- see CompetencyWizard.jsx)
+       already wraps the caller's own draft-save)
     ===================================================== */
 
     async function handleNext() {
@@ -147,17 +164,23 @@ export default function WizardStepContainer({
             : tone
         }`;
 
+    // Cancel label: Competency always shows "Cancel" + X; Evidence swaps to
+    // a bare "OK" once the model is read-only. Both are preserved verbatim
+    // via adaptiveCancelLabel rather than picking one behavior for both.
+    const showCancelIcon = !adaptiveCancelLabel || canEdit;
+    const cancelText = adaptiveCancelLabel ? (canEdit ? "Cancel" : "OK") : "Cancel";
+
     function renderNavigation() {
         return (
             <div className="sticky top-0 z-20 border-b border-slate-200 bg-white">
                 <div className="flex items-center justify-between gap-4 px-8 py-4">
-                    {/* Cancel */}
+                    {/* Cancel / OK */}
                     <button
                         onClick={handleCancelClick}
                         className="inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
                     >
-                        <X size={15} strokeWidth={2.25} />
-                        Cancel
+                        {showCancelIcon && <X size={15} strokeWidth={2.25} />}
+                        {cancelText}
                     </button>
 
                     {/* Step Indicator + Progress Rail */}
@@ -277,7 +300,7 @@ export default function WizardStepContainer({
                         <div className="mt-8 flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3.5 text-sm text-emerald-800">
                             <Lock size={16} strokeWidth={2.25} className="mt-0.5 shrink-0" />
                             <span>
-                                This Competency Model is confirmed and locked.
+                                This {modelLabel} is confirmed and locked.
                                 Structural changes require cloning.
                             </span>
                         </div>

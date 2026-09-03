@@ -1,17 +1,33 @@
-// EvidenceWizard/WizardSidebar.jsx
-// 🧭 Wizard Sidebar (Canonical Wizard Chrome — Enterprise Visual System)
+// components/wizard/WizardSidebar.jsx
+// 🧭 Shared Wizard Sidebar (Day 44 — Part 5.4 wizard shell)
 // ------------------------------------------------------------
-// Same shell as competencies/CompetencyWizard/WizardSidebar.jsx so
-// all four model wizards' sidebars look identical: a white, bordered
-// rail with a numbered/connected step tracker, a refined status
-// pill, and a quiet branding footer.
+// Extracted from competencies/CompetencyWizard/WizardSidebar.jsx and
+// evidences/EvidenceWizard/WizardSidebar.jsx, which a Day 44 audit found to
+// be byte-identical apart from branding text and prop-naming conventions
+// (`currentStep`/`onStepClick`/1-based `step.id` vs `currentStepIndex`/
+// `goToStep`/0-based array index). This shared version standardises on
+// 0-based indices -- callers that used to think in 1-based step ids (the
+// Competency wizard) adapt at the call site, which is a couple of lines,
+// rather than baking two numbering conventions into the shared component.
+//
+// Task Model's sidebar (taskModels/TaskWizard/WizardSidebar.jsx) is
+// deliberately NOT folded in here. It is not a styling variant of this
+// component: it reads from `useTaskModelWizard()` context instead of props,
+// bakes in a materially different navigation-gating rule
+// (`canNavigateBack = isEditable ? index < currentStep : true`, i.e. forward
+// navigation is never allowed via the rail, only via Next), and renders an
+// extra per-step "outstanding readiness work" indicator that Competency and
+// Evidence have no equivalent of. Forcing that into this contract would mean
+// either dropping the readiness indicator or growing this component a
+// second, parallel prop surface just for Task Model -- both worse than
+// leaving it as its own component. See claude/day44-wizard-shell.md.
 // ------------------------------------------------------------
 
 import React from "react";
 import { Check, ChevronLeft, ChevronRight, Lock } from "lucide-react";
 
-// Same lifecycle color map as every other wizard's sidebar, for
-// uniformity across all four model wizards.
+// Same lifecycle color map every model wizard's sidebar has used since
+// before this extraction, kept here as the single copy.
 const STATUS_COLORS = {
     draft: "bg-slate-100 text-slate-600",
     reviewed: "bg-amber-100 text-amber-700",
@@ -35,9 +51,13 @@ const STATUS_DOT_COLORS = {
 export default function WizardSidebar({
     steps = [],
     currentStepIndex,
-    goToStep,
+    onStepClick,
     locked = false,
     status = "draft",
+    title,
+    subtitle = "Guided authoring workflow",
+    brandInitial,
+    footerLabel,
 }) {
     // Purely a visual/UI concern local to this component -- folding the
     // rail doesn't affect wizard state, so it isn't lifted to context.
@@ -51,7 +71,7 @@ export default function WizardSidebar({
 
     return (
         <aside
-            className={`sticky top-0 flex h-screen shrink-0 flex-col border-r border-slate-200 bg-white transition-all duration-200 ease-in-out ${collapsed ? "w-[72px]" : "w-72"
+            className={`sticky top-0 flex h-screen shrink-0 flex-col border-r border-slate-200 bg-white transition-all duration-200 ease-in-out ${collapsed ? "w-wizard-rail-collapsed" : "w-wizard-rail"
                 }`}
         >
             {/* Collapse / Expand Handle */}
@@ -73,16 +93,14 @@ export default function WizardSidebar({
             <div className={`border-b border-slate-100 py-6 ${collapsed ? "px-3" : "px-6"}`}>
                 <div className={`flex items-center gap-3 ${collapsed ? "justify-center" : ""}`}>
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-900 text-sm font-bold text-white">
-                        E
+                        {brandInitial}
                     </div>
                     {!collapsed && (
                         <div className="min-w-0">
                             <h3 className="truncate text-sm font-semibold text-slate-900">
-                                Evidence Model Wizard
+                                {title}
                             </h3>
-                            <p className="text-xs text-slate-400">
-                                Guided authoring workflow
-                            </p>
+                            <p className="text-xs text-slate-400">{subtitle}</p>
                         </div>
                     )}
                 </div>
@@ -140,7 +158,7 @@ export default function WizardSidebar({
                         }[state];
 
                         return (
-                            <li key={step.id} className="relative pb-7 last:pb-0">
+                            <li key={step.id ?? index} className="relative pb-7 last:pb-0">
                                 {!isLastItem && (
                                     <span
                                         aria-hidden="true"
@@ -149,14 +167,12 @@ export default function WizardSidebar({
                                     />
                                 )}
 
-                                {/* A locked model is read-only, not immobile --
-                                    jumping between steps to READ a confirmed
-                                    model is what View mode is for. The steps
-                                    themselves render disabled inputs; the rail
-                                    does not need to disable navigation too. */}
+                                {/* Locked = read-only inputs, not a frozen rail: a
+                                    confirmed model still has to be walkable to be
+                                    readable (both source wizards agreed on this). */}
                                 <button
                                     type="button"
-                                    onClick={() => goToStep?.(index)}
+                                    onClick={() => onStepClick?.(index)}
                                     title={collapsed ? step.label : undefined}
                                     className={`group relative z-10 flex w-full cursor-pointer items-center gap-3 rounded-md text-left transition ${collapsed ? "justify-center" : ""
                                         }`}
@@ -188,9 +204,7 @@ export default function WizardSidebar({
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                         Evidence Centered Design (ECD)
                     </p>
-                    <p className="mt-0.5 text-[11px] text-slate-300">
-                        Evidence Layer
-                    </p>
+                    <p className="mt-0.5 text-[11px] text-slate-300">{footerLabel}</p>
                 </div>
             )}
         </aside>

@@ -10,8 +10,8 @@
 import React from "react";
 import toast from "react-hot-toast";
 import { useCompetencyWizard } from "./CompetencyWizardContext";
-import WizardSidebar from "./WizardSidebar";
-import WizardStepContainer from "./WizardStepContainer";
+import WizardSidebar from "@/components/wizard/WizardSidebar";
+import WizardStepContainer from "@/components/wizard/WizardStepContainer";
 import ErrorBoundary from "@/components/ui/ErrorBoundary";
 
 // Steps
@@ -145,14 +145,18 @@ export default function CompetencyWizard({ onCancel }) {
             {/* Sidebar */}
             <WizardSidebar
                 steps={STEP_CONFIG}
-                currentStep={currentStep}
-                onStepClick={(stepId) => {
+                currentStepIndex={currentStep - 1}
+                onStepClick={(index) => {
+                    const stepId = index + 1;
                     if (stepId <= currentStep || canProceed(currentStep)) {
                         setCurrentStep(stepId);
                     }
                 }}
                 locked={model?.locked}
                 status={model?.status}
+                title="Competency Model Wizard"
+                brandInitial="C"
+                footerLabel="Competency Layer"
             />
 
             {/* Main Panel -- WizardStepContainer owns its own top nav bar
@@ -174,6 +178,7 @@ export default function CompetencyWizard({ onCancel }) {
                     onSaveAndReview={saveAndReview}
                     onConfirm={confirmModel}
                     onReturnToDraft={returnToDraft}
+                    modelLabel="Competency Model"
                 >
                     <ErrorBoundary
                         resetKey={currentStep}
