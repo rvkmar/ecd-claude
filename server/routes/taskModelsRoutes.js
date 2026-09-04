@@ -14,6 +14,7 @@ import {
 } from "../utils/sessionDependencies.js";
 import { authorizeRole } from "../utils/authMiddleware.js";
 import { canTransition } from "../utils/lifecycleMatrix.js";
+import { compileAndActivate } from "../compositeLibrary/activation.js";
 
 const router = express.Router();
 
@@ -370,6 +371,68 @@ router.put("/:id", canAuthor, (req, res) => {
       return res.status(400).json({
         error: "TaskModel lifecycle validation failed",
         details: lifecycleErrors
+      });
+    }
+
+    /* --------------------------------------------------
+       D49a: ACTIVATION COMPILES THE DELIVERY PACKAGE
+
+       This is the caller finding F4 said `buildCompositeLibrary()` never
+       had, and the moment ADR 0003 names: "a compiled versioned package
+       built at Task Model activation".
+
+       WHY HERE and nowhere else: `operational` is reachable only through
+       this branch. Confirmation sets locked = true, and every state
+       reachable from confirmed stays locked, so confirmed -> operational
+       and suspended -> operational both land here. The unlocked branch
+       below cannot reach `operational` -- canTransition() offers it only
+       from confirmed or suspended, and both are locked.
+
+       REACTIVATION RECOMPILES, deliberately. suspended -> operational is a
+       Task Model re-entering service, and the item bank may have moved
+       while it was out: items archived, new items confirmed. Serving a
+       package compiled before the suspension would deliver a snapshot of
+       an item bank that no longer exists. Recompiling is cheap; the
+       previous package is deactivated rather than deleted, so anything
+       already scored against it is still explicable.
+
+       WHAT DOES NOT HAPPEN HERE: an Evidence Model version bump does NOT
+       silently recompile this package. That would make writing one entity
+       mutate another entity's delivery artefact, with nothing in the
+       request saying so. A live package that has fallen behind reports
+       itself through GET /api/compositeLibrary/:id/staleness (D48), and a
+       human rebuilds it through POST /api/compositeLibrary/rebuild/:id.
+       Refuse or advise, never act quietly -- the same rule every other
+       cross-entity effect in this codebase follows.
+    -------------------------------------------------- */
+    if (nextStatus === "operational") {
+      const activation = compileAndActivate(promoted, db);
+
+      if (!activation.ok) {
+        // Nothing is saved: neither the promotion nor the partial
+        // deactivation compileAndActivate performed on the snapshot. The
+        // Task Model stays in its previous state rather than going live
+        // with no package behind it.
+        return res.status(activation.status).json({
+          error: activation.error,
+          details: activation.details,
+        });
+      }
+
+      db.taskModels[idx] = promoted;
+      saveDB(db);
+
+      // The package and its warnings ride back with the Task Model so the
+      // author sees, at the moment of activation, that (say) an item was
+      // skipped because its evidenceModelId did not resolve.
+      return res.json({
+        ...promoted,
+        compositeLibrary: {
+          id: activation.record.id,
+          taskModelVersion: activation.record.taskModelVersion,
+          itemCount: activation.record.items.length,
+          warnings: activation.warnings,
+        },
       });
     }
 

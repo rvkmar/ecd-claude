@@ -13,7 +13,12 @@ import {
 } from "../delivery/evidenceAccumulation.js";
 import { resolveAssemblyProgress } from "../delivery/assemblyProgress.js";
 import { recordItemUsage } from "../utils/itemExposure.js";
-import { log2 } from "mathjs"; // if not available, define inline
+// D49b: `import { log2 } from "mathjs"` stood here and was NEVER CALLED --
+// entropy() below has always used the native Math.log2. It was mathjs's only
+// reference anywhere in src/ or server/, so the whole dependency was dead
+// weight, and two test files carried widened timeouts specifically to absorb
+// its cold-import cost (sessionRoutes.test.js, routeAuth.test.js). An unused
+// import was buying real test flakiness. Removed.
 
 // Day 28 (Week 6): a session scores through an authored Evidence Model,
 // via server/delivery/evidenceIdentification.js, when the client opts in

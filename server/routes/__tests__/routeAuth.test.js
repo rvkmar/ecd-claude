@@ -55,11 +55,15 @@ describe.each(PROTECTED_ROUTERS)(
         const res = await request(app).get(path + "/");
         expect(res.status).toBe(401);
       },
-      // sessionRoutes' cold dynamic import (it pulls in mathjs) occasionally
-      // exceeds the default 5000ms under memory pressure on a constrained
-      // CI/sandbox runner; this is a slow-import timing issue, not a
-      // behavioral flake, so a longer budget is the correct fix rather than
-      // a retry.
+      // sessionRoutes' cold dynamic import occasionally exceeds the default
+      // 5000ms under memory pressure on a constrained CI/sandbox runner; this
+      // is a slow-import timing issue, not a behavioral flake, so a longer
+      // budget is the correct fix rather than a retry.
+      //
+      // D49b removed the largest single contributor: a dead `mathjs` import
+      // that was never called. The budget is kept as headroom -- the module
+      // still pulls in the whole delivery layer -- but the specific cost this
+      // comment used to name is gone.
       15000
     );
 

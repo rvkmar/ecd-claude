@@ -31,11 +31,8 @@
 import express from "express";
 import { authenticateToken, authorizeRole } from "../utils/authMiddleware.js";
 import { loadDB, saveDB } from "../../src/utils/db-server.js";
-import { validateEntity } from "../../src/utils/schema.js";
-import {
-  buildCompositeLibrary,
-  isCompositeLibraryStale,
-} from "../compositeLibrary/builder.js";
+import { isCompositeLibraryStale } from "../compositeLibrary/builder.js";
+import { compileAndActivate } from "../compositeLibrary/activation.js";
 
 const router = express.Router();
 
@@ -43,8 +40,9 @@ router.use(authenticateToken);
 
 const canRebuild = authorizeRole(["admin"]);
 
-let idCounter = 0;
-const genId = () => `cl${Date.now()}${(idCounter++ % 1000).toString().padStart(3, "0")}`;
+// D49a: id generation moved into compositeLibrary/activation.js, so the two
+// paths that create a package share one counter and cannot mint the same id
+// inside a single millisecond.
 
 // ------------------------------
 // GET /api/compositeLibrary            ?taskModelId= filters
@@ -137,64 +135,28 @@ router.post("/rebuild/:taskModelId", canRebuild, (req, res) => {
   const taskModel = (db.taskModels || []).find((t) => t.id === req.params.taskModelId);
   if (!taskModel) return res.status(404).json({ error: "TaskModel not found" });
 
-  // The builder DEGRADES rather than throwing: a Task Model that is not
-  // yet instantiable compiles to an EMPTY package plus a warning, and it
-  // throws only for programmer errors (missing arguments). So the try/catch
-  // covers the latter, and the empty-package case is handled explicitly
-  // below rather than being activated silently.
-  let built;
-  try {
-    built = buildCompositeLibrary(taskModel, db);
-  } catch (e) {
-    return res.status(500).json({ error: "Composite library build failed", details: e.message });
-  }
+  // D49a: the compile / refuse-if-empty / deactivate-previous / validate
+  // sequence used to live here. It now lives in compositeLibrary/activation.js
+  // because Task Model promotion needs exactly the same behaviour, and two
+  // copies of "what activating a package means" would be free to drift. This
+  // route is now only responsible for deciding WHICH Task Model to compile
+  // and for persisting the result.
+  const result = compileAndActivate(taskModel, db);
 
-  const { record: compiled, warnings } = built;
-
-  // Refusing rather than guessing, in the house style. Activating an empty
-  // package would make a Task Model look delivery-ready while resolving to
-  // nothing at request time — a quiet failure of exactly the kind the
-  // delivery path must not have. The warnings say why it was empty.
-  if (!Array.isArray(compiled.items) || compiled.items.length === 0) {
-    return res.status(409).json({
-      error:
-        "Refusing to activate an empty composite library package. The Task Model compiled to zero items.",
-      details: warnings,
+  if (!result.ok) {
+    // Deliberately no saveDB() on failure: compileAndActivate mutates the
+    // snapshot as it deactivates the previous package, and that mutation must
+    // die with the request rather than retiring a live package on a failed
+    // rebuild.
+    return res.status(result.status).json({
+      error: result.error,
+      details: result.details,
     });
   }
 
-  const now = new Date().toISOString();
-  const record = {
-    ...compiled,
-    id: genId(),
-    active: true,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  const { valid, errors } = validateEntity("compositeLibrary", record, db);
-  if (!valid) {
-    return res
-      .status(400)
-      .json({ error: "Composite library validation failed", details: errors });
-  }
-
-  db.compositeLibrary = db.compositeLibrary || [];
-  // At most one active package per taskModelId — schema.js enforces this
-  // too; deactivating here keeps the write valid rather than relying on
-  // the validator to reject it.
-  db.compositeLibrary = db.compositeLibrary.map((r) =>
-    r.taskModelId === record.taskModelId && r.active
-      ? { ...r, active: false, updatedAt: now }
-      : r
-  );
-  db.compositeLibrary.push(record);
   saveDB(db);
 
-  // Warnings are returned alongside the package rather than swallowed: a
-  // package can compile successfully and still have skipped an item whose
-  // evidenceModelId did not resolve, and the caller needs to see that.
-  res.status(201).json({ ...record, warnings });
+  res.status(201).json({ ...result.record, warnings: result.warnings });
 });
 
 export default router;

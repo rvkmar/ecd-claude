@@ -9,9 +9,10 @@
 // file's job is to prove the new path works and the old one is untouched
 // by it, not to backfill full legacy coverage).
 //
-// sessionRoutes.js imports `mathjs` (for `log2`), whose cold import is
-// already documented elsewhere in this repo (routeAuth.test.js) as slow
-// enough on this memory-constrained sandbox to need a widened timeout.
+// sessionRoutes.js has a cold import cost that routeAuth.test.js documents as
+// slow enough on this memory-constrained sandbox to need a widened timeout.
+// (It used to import `mathjs` for a `log2` it never called; D49b removed that,
+// but the module still pulls in the whole delivery layer.)
 // Re-importing the router fresh per test (the vi.resetModules() + dynamic
 // import pattern evidenceModelLifecycle.test.js uses) pays that cost once
 // per test; with 7+ tests that compounds into real flakiness. Only the one
