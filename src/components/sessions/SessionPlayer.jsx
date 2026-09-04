@@ -1,3 +1,4 @@
+import ItemPresenter, { canPresentItem } from "./ItemPresenter";
 import React, { useEffect, useState, useRef } from "react";
 import Modal from "../ui/Modal";
 import toast from "react-hot-toast";
@@ -31,6 +32,12 @@ export default function SessionPlayer({
   const [currentTaskId, setCurrentTaskId] = useState(null);
   const [task, setTask] = useState(null); // enriched task for currentTaskId
   const [taskModel, setTaskModel] = useState(null); // enriched taskModel for the current task
+  // D47: when the current task names an ITEM, these carry it. `question`
+  // stays null in that case and vice versa -- a task names either a
+  // questionId or an itemId, never both (enforced in tasksRoutes.js), so
+  // exactly one of these two paths is live for any given task.
+  const [deliveredItem, setDeliveredItem] = useState(null);
+  const [itemResponse, setItemResponse] = useState(null);
   const [question, setQuestion] = useState(null);
   const [evidenceModels, setEvidenceModels] = useState([]);
   
@@ -336,8 +343,30 @@ export default function SessionPlayer({
         setParentTaskModel(null);
       }
 
+      // D47: an item-backed task presents the ECD Item, not a legacy
+      // question. Resolved from the task's own itemId pointer -- NOT
+      // re-derived from taskModel.itemMappings, which the project treats
+      // as best-effort until D154 makes it authoritative.
+      if (enrichedTask?.itemId) {
+        try {
+          const it = await fetchJsonSafe(`/api/items/${enrichedTask.itemId}`);
+          setDeliveredItem(it || null);
+        } catch (e) {
+          console.warn("Failed to fetch item", enrichedTask.itemId, e);
+          setDeliveredItem(null);
+        }
+        setItemResponse(null);
+        setQuestion(null);
+        setReadingPassage(null);
+        setActivePassageId(null);
+        setActivePassageQuestions([]);
+      } else if (enrichedTask?.questionId) {
+        setDeliveredItem(null);
+        setItemResponse(null);
+      }
+
       // fetch question if linked
-      if (enrichedTask?.questionId) {
+      if (!enrichedTask?.itemId && enrichedTask?.questionId) {
         try {
           const q = await fetchJsonSafe(`/api/questions/${enrichedTask.questionId}`);
           setQuestion(q || null);
@@ -429,6 +458,47 @@ export default function SessionPlayer({
     e.preventDefault();
     if (!currentTaskId) return;
     setSubmitting(true);
+
+    // D47: THE ITEM PATH. Sends the raw response and nothing else.
+    //
+    // No scoredValue, no questionId, and no itemMappings lookup: the
+    // server derives the Observable Variable value from the item's own
+    // evidenceActivationMap via identifyEvidence(), and derives the
+    // observation/evidence binding from the item record itself. The
+    // client asserting a score here is exactly finding F3, and the
+    // legacy branch below is where that assertion still lives.
+    if (deliveredItem) {
+      const itemPayload = {
+        taskId: currentTaskId,
+        itemId: deliveredItem.id,
+        rawAnswer: itemResponse ?? null,
+      };
+
+      try {
+        const res = await fetch(`/api/sessions/${sessionIdRef.current}/submit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(itemPayload),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || `Submit failed (status ${res.status})`);
+        }
+        const updatedSession = await res.json();
+        setSession(updatedSession);
+        setItemResponse(null);
+        setDeliveredItem(null);
+        await loadNextTask();
+      } catch (err) {
+        // Match the legacy branch's failure reporting, but through the
+        // toast system D43 made accessible rather than a blocking alert().
+        console.error("Item submit failed", err);
+        notify(err.message || "Submission failed", "error");
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
 
     const payload = {
       taskId: currentTaskId,
@@ -747,7 +817,34 @@ export default function SessionPlayer({
             </div>
           )}
 
-          {question ? (
+          {/* D47: item-backed task. Rendered by its own presenter so the
+              legacy question path below is untouched by the cutover. */}
+          {deliveredItem ? (
+            <form onSubmit={handleSubmit} className="space-y-3">
+              <ItemPresenter
+                item={deliveredItem}
+                value={itemResponse}
+                onChange={setItemResponse}
+                disabled={
+                  submitting ||
+                  !(
+                    session &&
+                    (session.status === SESSION_STATUS.IN_PROGRESS ||
+                      session.status === undefined) &&
+                    !session.autoFinished &&
+                    !session.isCompleted
+                  )
+                }
+              />
+              <button
+                type="submit"
+                disabled={submitting || !canPresentItem(deliveredItem)}
+                className="px-4 py-2 rounded-md bg-primary text-primary-foreground disabled:opacity-50"
+              >
+                {submitting ? "Submitting…" : "Submit"}
+              </button>
+            </form>
+          ) : question ? (
             <form onSubmit={handleSubmit} className="space-y-3">
               <div>
               {/* 🔹 Display Reading Passage if linked */}
