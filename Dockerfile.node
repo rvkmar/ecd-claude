@@ -1,9 +1,9 @@
-FROM node:18-alpine AS api
+FROM node:24-alpine AS api
 WORKDIR /app
 
 # Install deps
 COPY package*.json ./
-RUN npm ci
+RUN npm ci --omit=dev
 
 # Copy only server code
 COPY server ./server
