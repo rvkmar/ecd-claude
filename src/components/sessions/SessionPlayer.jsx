@@ -5,7 +5,7 @@ import toast from "react-hot-toast";
 import { usePolicies } from "../../api/queries/policies";
 import { SESSION_STATUS } from "../../utils/sessionStatus";
 
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 // SessionPlayer.jsx
 // Runtime delivery component for a session.
 // Refactor chunk 1/5:
@@ -91,16 +91,43 @@ export default function SessionPlayer({
     sessionIdRef.current = sessionId;
   }, [sessionId]);
 
-  // ----- derive sessionId from URL if prop not provided -----
+  /* ----- derive sessionId when no prop was passed -----
+     D50 (finding F7). This used to be a raw regex on window.location.pathname
+     looking for `/sessions/(s\d+)/player`. NO ROUTE IN App.jsx HAS EVER
+     PRODUCED THAT SHAPE: every role registers `sessions/play` (no id) and
+     `sessions/:sessionId/review`. The component also never read useParams().
+     So the player could not obtain a session id from any route the app
+     defines, and StudentDashboard renders it with no prop -- which meant a
+     student could not reach a session at all, and the district/teacher review
+     route could not load one either.
+
+     Verified in a browser before changing anything: /student/sessions/<id>/player
+     fell through to the dashboard, and the Play tab reported "Session id not
+     provided."
+
+     useParams() is now the primary source, so the id comes from the route
+     definition rather than from a pattern the routes have to happen to match.
+     The legacy regex is kept as a fallback for any bookmarked `/player` URL,
+     and `id` is accepted alongside `sessionId` so a route may name it either
+     way without silently rendering an empty player. */
+  const routeParams = useParams();
+
   useEffect(() => {
     if (propSessionId) return;
+
+    const fromRoute = routeParams?.sessionId || routeParams?.id;
+    if (fromRoute) {
+      setSessionId(fromRoute);
+      return;
+    }
+
     try {
-      const m = window.location.pathname.match(/\/sessions\/(s[0-9]+)\/player/);
+      const m = window.location.pathname.match(/\/sessions\/(s[0-9]+)\/(?:player|review)/);
       if (m) setSessionId(m[1]);
     } catch (e) {
       // ignore quietly
     }
-  }, [propSessionId]);
+  }, [propSessionId, routeParams?.sessionId, routeParams?.id]);
 
   // ----- teacher review mode indicator -----
   const isTeacher = mode === "teacher";

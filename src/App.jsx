@@ -167,7 +167,17 @@ export default function App() {
               path="/student/*"
               element={
                 <ProtectedRoute expectedRole="student">
-                  <StudentDashboard />
+                  {/* D50 (finding F7): this used to be a bare <StudentDashboard />,
+                      so EVERY /student/* URL rendered the dashboard and the
+                      session player could never be routed to with an id. The
+                      nested <Routes> mirrors what /district/* and /teacher/*
+                      already do. The trailing "*" keeps the previous behaviour
+                      for any other path. */}
+                  <Routes>
+                    <Route index element={<StudentDashboard />} />
+                    <Route path="sessions/:sessionId/player" element={<SessionPlayer />} />
+                    <Route path="*" element={<StudentDashboard />} />
+                  </Routes>
                 </ProtectedRoute>
               }
             />
