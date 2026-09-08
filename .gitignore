@@ -151,3 +151,6 @@ migrations.log.json
 
 *storybook.log
 storybook-static
+
+.claude
+.claude/*
