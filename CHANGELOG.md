@@ -33,6 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Q-matrix duplicate-row check corrected from blocking to advisory, matching
   the D52 spec.
+- Q-matrix editor: "Save for Review" no longer silently does nothing on a
+  brand-new Q-matrix. It previously required two clicks to actually save
+  the record for review, with no error shown on the first attempt.
+- Q-matrix editor: an item added to the grid with no attributes checked can
+  no longer be saved as a draft or sent for review. Previously it could be
+  saved and would then silently disappear the next time the record was
+  reopened, along with its own validation error.
 
 ### Security
 
@@ -40,11 +47,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known gaps (carried forward, see progress ledger)
 
-- No server-side strict validator for Q-matrix rows yet, so the client-side
-  checks above can be bypassed via a direct API call.
+- No server-side strict validator for the Q-matrix's *advisory* rules
+  (duplicate rows, weak identifiability, low coverage) — by design, since
+  those rules are advisory-only and never meant to block. The one
+  *blocking* rule (all-zero rows) is no longer a gap: it's now enforced
+  client-side at save time, not just at confirm time, so it can't reach
+  the server unresolved (see Fixed, above). Referential integrity
+  (unknown/undeclared items and attributes, duplicate entries) was
+  confirmed this session to already be enforced server-side.
 - Q-matrix item scoping uses the item's evidence-model chain, not a bound
   Task Model as the original spec described; this premise is unresolved.
-- No live browser walkthrough of the Q-matrix editor has been run yet.
+- A live browser walkthrough of the Q-matrix editor has now been run
+  (this session) — see `claude/day52-w11-live-browser-walkthrough.md`.
+  The remaining D51/D52 debt is: no binary-SMV filter on the Competency
+  Model picker, no virtualization, no keyboard interaction, and the item-
+  scoping premise above.
 
 ## [1.0.0] - 2026-09-10
 
