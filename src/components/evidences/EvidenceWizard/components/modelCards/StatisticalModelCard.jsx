@@ -23,6 +23,7 @@ import BNConfigPanel from "../config/BNConfigPanel";
 import CTTConfigPanel from "../config/CTTConfigPanel";
 import SumConfigPanel from "../config/SumConfigPanel";
 import ThresholdConfigPanel from "../config/ThresholdConfigPanel";
+import DINAConfigPanel from "../config/DINAConfigPanel";
 
 import EvidenceChainCard from "../EvidenceChainCard";
 
@@ -203,6 +204,14 @@ export default function StatisticalModelCard({
 
             case "threshold":
                 return <ThresholdConfigPanel {...commonProps} />;
+
+            // D53. Both families share one panel: they differ in how many
+            // parameters an item carries, which is a calibration concern,
+            // not an authoring one. The single authored decision -- which
+            // Q-matrix -- is identical for both.
+            case "dina":
+            case "gdina":
+                return <DINAConfigPanel {...commonProps} />;
 
             default:
                 return null;

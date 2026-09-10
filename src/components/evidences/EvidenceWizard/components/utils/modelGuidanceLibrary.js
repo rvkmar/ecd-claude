@@ -243,6 +243,106 @@ export const MODEL_GUIDANCE_LIBRARY = {
 
         configPanel: "ThresholdConfigPanel"
 
+    },
+
+    /* =====================================================
+       DINA -- Deterministic Inputs, Noisy "And" gate
+       -----------------------------------------------------
+       A latent-CLASS model, not a latent-trait one. Where IRT places a
+       learner on a continuum, DINA classifies them into a discrete
+       mastery profile over the attributes a Q-matrix declares: for each
+       item, either they have every attribute it requires or they do not,
+       softened by two parameters -- `slip` (a master answers wrongly)
+       and `guess` (a non-master answers rightly).
+
+       `allowedVariableTypes` is BINARY ONLY, and that is not a
+       simplification. schema.js:1386 lists dina/gdina among the models a
+       binary competency permits and omits them from every other variable
+       type's list, so offering the family for an ordinal or continuous
+       competency would put a card on the page that confirmation then
+       rejects -- the exact "offered then rejected" defect the comment
+       above the CTT entry warns about, and which this library exists to
+       prevent.
+
+       Note the layer distinction the panel has to keep straight: the gate
+       here is the COMPETENCY's `variableType`, while the Q-matrix's
+       columns are the competency MODEL's binary `smVariables`. Two
+       different binaries, one per layer.
+    ===================================================== */
+
+    dina: {
+
+        type: "dina",
+
+        label: "DINA",
+
+        family: "Diagnostic",
+
+        description:
+            "Classifies the learner into a discrete mastery profile over the attributes a Q-matrix declares. An item is answered correctly when every attribute it requires is mastered, softened by a slip and a guess parameter.",
+
+        complexity: "high",
+
+        calibrationSample: "≈ 500+ responses per item for stable slip/guess estimates",
+
+        // A diagnostic profile is exactly what adaptive selection wants to
+        // narrow, but selection against an attribute profile is D56's work,
+        // not something this family can claim yet.
+        adaptiveCompatible: false,
+
+        supportsCalibration: true,
+
+        allowedVariableTypes: [
+            "binary"
+        ],
+
+        visualization: null,
+
+        configPanel: "DINAConfigPanel"
+
+    },
+
+    /* =====================================================
+       G-DINA -- the saturated generalisation
+       -----------------------------------------------------
+       DINA's conjunctive "all required attributes or nothing" is one
+       point in a family. G-DINA estimates a success probability for
+       EVERY sub-pattern of an item's required attributes, so partial
+       mastery can carry partial credit and compensatory or disjunctive
+       item behaviour is representable rather than assumed away.
+
+       The cost is parameters: an item requiring k attributes needs 2^k
+       probabilities instead of 2, which is why the calibration sample
+       below is stated per required attribute rather than per item.
+    ===================================================== */
+
+    gdina: {
+
+        type: "gdina",
+
+        label: "G-DINA",
+
+        family: "Diagnostic",
+
+        description:
+            "The saturated diagnostic model: a success probability for every sub-pattern of the attributes an item requires, so partial mastery and compensatory items are representable rather than assumed away.",
+
+        complexity: "high",
+
+        calibrationSample: "Grows as 2^k in an item's required-attribute count k; ≈ 1000+ responses is a realistic floor",
+
+        adaptiveCompatible: false,
+
+        supportsCalibration: true,
+
+        allowedVariableTypes: [
+            "binary"
+        ],
+
+        visualization: null,
+
+        configPanel: "DINAConfigPanel"
+
     }
 
 };
