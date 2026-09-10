@@ -19,7 +19,7 @@
 // mistake, not just an unaddressed item sitting in a large bank.
 // ------------------------------------------------------------
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 
 import { Input } from "@/components/ui/input";
@@ -66,9 +66,21 @@ export default function QMatrixEditor({ qMatrixId, onCancel, onSaved }) {
   const [includedItemIds, setIncludedItemIds] = useState([]);
   const [isDirty, setIsDirty] = useState(false);
 
+  // `draft.id` is also mirrored into this ref, updated synchronously
+  // wherever `draft` changes. `transitionTo()` reads the ref rather than
+  // `draft.id` so it never sees a stale value: `handleSave()` in
+  // WizardStepContainer awaits onSaveDraft() then calls onSaveAndReview()
+  // using the SAME closures captured at the render that created them --
+  // React hasn't necessarily re-rendered (and hasn't necessarily even run
+  // the commit's effects) by the time the second call happens, so a plain
+  // `draft.id` read here can still be `undefined` for a brand-new record
+  // even though persist() already saved it and got a real id back.
+  const draftIdRef = useRef(draft.id);
+
   useEffect(() => {
     if (isEditing && existing) {
       setDraft(existing);
+      draftIdRef.current = existing.id;
       setIncludedItemIds(Array.from(new Set((existing.entries || []).map((e) => e.itemId))));
       setIsDirty(false);
     }
@@ -154,13 +166,30 @@ export default function QMatrixEditor({ qMatrixId, onCancel, onSaved }) {
     });
   }
 
-  // Save (draft -> reviewed) requires reviewed-level completeness.
-  // Lock & Confirm additionally requires at least one entry and zero D52
-  // errors -- matching the server's own confirmed-level lifecycle check.
+  // Save (draft -> reviewed) requires reviewed-level completeness, AND zero
+  // D52 blocking errors (currently just "empty-row"). This second part
+  // isn't optional: an item included with no checked attribute cells
+  // produces zero `entries[]` rows, so the server has nothing to persist
+  // for it -- `includedItemIds` on reload is derived purely from
+  // `entries[].itemId` (see the load effect above). If a draft/reviewed
+  // save were allowed to go through with an empty row still on the grid,
+  // that item would silently disappear from the matrix (taking its
+  // still-unresolved "requires no attributes" error with it) the next
+  // time this record is reopened, with no warning it ever happened. Since
+  // the data model has no way to represent "item included, zero
+  // attributes" at rest, the only honest fix is to block the save itself
+  // until the author resolves or removes the row -- matching rule 1's own
+  // BLOCKING severity (see QMatrixValidity.js) rather than only enforcing
+  // it at confirm time.
+  // Lock & Confirm additionally requires at least one entry -- matching
+  // the server's own confirmed-level lifecycle check.
   const meetsReviewed = Boolean(
-    draft.name && draft.competencyModelId && draft.attributeIds.length > 0
+    draft.name &&
+      draft.competencyModelId &&
+      draft.attributeIds.length > 0 &&
+      validity.errors.length === 0
   );
-  const meetsConfirmed = meetsReviewed && draft.entries.length > 0 && validity.errors.length === 0;
+  const meetsConfirmed = meetsReviewed && draft.entries.length > 0;
   const canProceed = draft.status === "reviewed" ? meetsConfirmed : meetsReviewed;
 
   async function persist() {
@@ -178,6 +207,7 @@ export default function QMatrixEditor({ qMatrixId, onCancel, onSaved }) {
         ? await updateMutation.mutateAsync({ id: draft.id, payload })
         : await createMutation.mutateAsync(payload);
       setDraft(saved);
+      draftIdRef.current = saved.id;
       setIsDirty(false);
       return saved;
     } catch (err) {
@@ -192,10 +222,12 @@ export default function QMatrixEditor({ qMatrixId, onCancel, onSaved }) {
   }
 
   async function transitionTo(status, successMessage, failureMessage) {
-    if (!draft.id) return;
+    const id = draftIdRef.current;
+    if (!id) return;
     try {
-      const saved = await transitionMutation.mutateAsync({ id: draft.id, status });
+      const saved = await transitionMutation.mutateAsync({ id, status });
       setDraft(saved);
+      draftIdRef.current = saved.id;
       setIsDirty(false);
       toast.success(successMessage);
       return saved;
