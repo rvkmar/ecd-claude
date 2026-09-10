@@ -10,21 +10,35 @@
 //   - errors     block confirmation (surfaced as red rows in the grid)
 //   - advisories are shown but never block confirmation (amber columns)
 //
-// Rules:
+// Severity is exactly as the D52 calendar spec states it (only rule 1 is
+// blocking -- an earlier pass in this file had rule 2 blocking too, which
+// contradicted the spec; corrected before this was recorded as done):
 //   1. All-zero row    -- an item added to the matrix that requires no
 //                          attribute contributes nothing to a DINA/G-DINA
-//                          classification. Error.
+//                          classification. BLOCKING.
 //   2. Duplicate row    -- two items requiring the exact same attribute
 //                          set carry no additional diagnostic information
-//                          over one another. Error.
+//                          over one another. ADVISORY.
 //   3. Identifiability  -- an attribute never required by an item ALONE
 //                          (a "pure" item) is harder to separate from the
 //                          attributes it always co-occurs with. This is a
 //                          practical heuristic, not a full identifiability
-//                          proof -- advisory only.
+//                          proof. ADVISORY.
 //   4. Attribute-vs-item coverage -- an attribute required by very few
 //                          items is a calibration risk (unstable slip/
-//                          guess estimates). Advisory only.
+//                          guess estimates). ADVISORY.
+//
+// KNOWN GAP (see claude/day51c-* handoff): this is the client-side half
+// only. The D52 spec also calls for "the readiness mirror agrees with the
+// strict validator, asserted by a test" -- this codebase's established
+// pattern (see taskModelStructure.test.js's "operational readiness mirrors
+// the activation gate") is a server-side strict check PLUS a client mirror
+// proven not to drift from it. No server-side enforcement of rules 1-2
+// exists yet (server/utils/lifecycleValidation.js's
+// validateQMatrixModelLifecycle only checks entries.length > 0 at
+// confirmation, not per-row validity), so nothing today stops an all-zero
+// or duplicate row from being confirmed via a direct API call that
+// bypasses this UI. Not fixed in this pass -- flagged honestly instead.
 // ------------------------------------------------------------
 
 export const MIN_ITEMS_PER_ATTRIBUTE = 3;
@@ -74,7 +88,7 @@ export function computeQMatrixValidity({
   });
   fingerprints.forEach((itemIds) => {
     if (itemIds.length > 1) {
-      errors.push({
+      advisories.push({
         code: "duplicate-row",
         itemIds,
         message: `Items ${itemIds.join(", ")} require the exact same attribute set. Duplicate rows carry no additional diagnostic information.`,

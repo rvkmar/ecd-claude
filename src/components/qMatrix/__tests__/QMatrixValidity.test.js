@@ -15,8 +15,8 @@ describe("computeQMatrixValidity", () => {
     expect(errors[0]).toMatchObject({ code: "empty-row", itemId: "i1" });
   });
 
-  it("flags two items with the exact same attribute set as duplicate rows", () => {
-    const { errors } = computeQMatrixValidity({
+  it("flags two items with the exact same attribute set as an advisory, not an error (D52 spec: duplicate rows are ADVISORY)", () => {
+    const { errors, advisories } = computeQMatrixValidity({
       attributeIds: ["a1", "a2"],
       includedItems: items(["i1", "i2"]),
       entries: [
@@ -26,13 +26,14 @@ describe("computeQMatrixValidity", () => {
         { itemId: "i2", attributeId: "a2" },
       ],
     });
-    const dup = errors.find((e) => e.code === "duplicate-row");
+    expect(errors.filter((e) => e.code === "duplicate-row")).toHaveLength(0);
+    const dup = advisories.find((a) => a.code === "duplicate-row");
     expect(dup).toBeTruthy();
     expect(dup.itemIds.sort()).toEqual(["i1", "i2"]);
   });
 
   it("does not flag distinct attribute sets as duplicates", () => {
-    const { errors } = computeQMatrixValidity({
+    const { advisories } = computeQMatrixValidity({
       attributeIds: ["a1", "a2"],
       includedItems: items(["i1", "i2"]),
       entries: [
@@ -40,7 +41,7 @@ describe("computeQMatrixValidity", () => {
         { itemId: "i2", attributeId: "a2" },
       ],
     });
-    expect(errors.filter((e) => e.code === "duplicate-row")).toHaveLength(0);
+    expect(advisories.filter((a) => a.code === "duplicate-row")).toHaveLength(0);
   });
 
   it("warns (advisory) when an attribute is never required by a single item alone", () => {
