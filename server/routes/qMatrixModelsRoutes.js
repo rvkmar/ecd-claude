@@ -170,17 +170,55 @@ router.put("/:id", canAuthor, (req, res) => {
 
 // ------------------------------
 // DELETE /api/qMatrixModels/:id
-// Refused while any evidence model's statisticalModels[] points at it.
-// A dangling qMatrixId would make a dina/gdina model unvalidatable and
-// unscoreable, which is a silent failure rather than a loud one.
+// Refused on two grounds, in order:
+//
+//   1. A CONFIRMED (locked) Q-matrix is never deletable. In ECD terms a
+//      Q-matrix is not an ordinary record -- it is the STRUCTURE of the
+//      Measurement Model inside an Evidence Model (Mislevy & Riconscente
+//      2005 §2.3.2: latent-class models are Measurement Models; the
+//      Q-matrix is what defines one). Destroying it destroys the meaning
+//      of every attribute-mastery posterior ever accumulated against it:
+//      the stored numbers survive, but nothing records what they were
+//      about. itemsRoutes.js already states exactly this principle for
+//      items ("the responses it collected still have to be
+//      interpretable"); it applies with more force here, because one
+//      Q-matrix underwrites every response scored by the models that
+//      bind it. Archive instead -- the lifecycle matrix provides that
+//      transition precisely so withdrawal does not mean destruction.
+//
+//   2. Refused while any evidence model's statisticalModels[] points at
+//      it. A dangling qMatrixId would make a dina/gdina model
+//      unvalidatable and unscoreable, which is a silent failure rather
+//      than a loud one.
+//
+// NOTE ON (2): the pointer lives at `sm.structureConfig.qMatrixId`, NOT
+// `sm.qMatrixId`. schema.js's DINA/G-DINA block (`sm.structureConfig
+// ?.qMatrixId`) and attributeAccumulation.js (same path) are the two
+// authorities on this shape, and both read the nested one. This guard
+// read the FLAT path from the day it was written, so its filter never
+// matched anything, `blocking` was always empty, and the refusal it
+// exists to perform had never once fired -- a Q-matrix underwriting a
+// live diagnostic model could be deleted out from under it. The guard
+// had only ever been observed to pass, which is the same trap D48 and
+// D49b both recorded: a guard nobody has watched FAIL is not evidence of
+// anything. Both branches are now covered by tests.
 // ------------------------------
 router.delete("/:id", canDelete, (req, res) => {
   const db = loadDB();
   const row = (db.qMatrixModels || []).find((q) => q.id === req.params.id);
   if (!row) return res.status(404).json({ error: "Q-matrix model not found" });
 
+  if (row.locked === true) {
+    return res.status(409).json({
+      error:
+        "A confirmed Q-matrix cannot be deleted. Archive it instead — it defines what every attribute-mastery estimate scored against it means.",
+    });
+  }
+
   const blocking = (db.evidenceModels || []).filter((em) =>
-    (em.statisticalModels || []).some((sm) => sm?.qMatrixId === req.params.id)
+    (em.statisticalModels || []).some(
+      (sm) => sm?.structureConfig?.qMatrixId === req.params.id
+    )
   );
   if (blocking.length > 0) {
     return res.status(409).json({

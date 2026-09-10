@@ -530,6 +530,84 @@ export function validateQMatrixModelLifecycle(qMatrixModel, db = null, options =
     if (!Array.isArray(qMatrixModel.entries) || qMatrixModel.entries.length === 0) {
       errors.push("Q-matrix must declare at least one item-attribute entry before confirmation.");
     }
+
+    /* D52's ONE BLOCKING RULE, server side: "no all-zero row."
+       -----------------------------------------------------------------
+       The client (QMatrixValidity.js rule 1) blocks on an item sitting in
+       the grid with nothing checked. That check runs over the editor's own
+       `includedItems` -- ephemeral UI state with no counterpart at rest,
+       because `entries[]` is SPARSE: an item requiring no attribute
+       produces no rows, so from the stored record's point of view it is
+       not absent-and-wrong, it is simply absent. A literal transcription
+       of the client rule is therefore impossible here, and pretending
+       otherwise would give the mirror something to agree with that the
+       server cannot actually see.
+
+       What the server CAN see is the same defect from the other side: an
+       item that will really be scored against this Q-matrix and that the
+       matrix does not place. That is the identical failure the delivery
+       runtime already refuses to reason from -- attributeAccumulation.js
+       excludes such a response with "declares no required attributes for
+       item X; that response carries no diagnostic information."
+
+       Why BLOCKING rather than advisory, in the framework's own terms: an
+       item loading on no attribute is a datum with no warrant. Mislevy &
+       Riconscente (2005) §1 defines the warrant as the reasoning that
+       explains why data count as evidence for a claim; §2.3.2 makes the
+       Measurement Model the thing that "characterizes the weight and
+       direction of evidence that Observable Variables convey about
+       Student Model Variables." An all-zero row conveys neither weight
+       nor direction about any Student Model Variable. It is not a weak
+       measurement, it is a broken link in the assessment argument -- so
+       it belongs at the gate, not in an advisory panel.
+
+       Scope. "Will really be scored against this Q-matrix" is derivable
+       without guessing: items whose Evidence Model runs a dina/gdina
+       Measurement Model bound to THIS matrix. Deliberately narrow in two
+       ways:
+         - Only deliverable items (confirmed/operational) count. A draft
+           item may still be abandoned or re-pointed, and blocking a
+           Q-matrix on one would gate a frozen structure behind work that
+           may never land. validateTaskModelLifecycle's activation gate
+           reasons about confirmed items for the same reason.
+         - When no Evidence Model binds this matrix yet, the set is empty
+           and the rule is vacuously satisfied. That is correct, not a
+           hole: nothing scores against it, so no item can be missing
+           from it. It also keeps the rule from making the editor
+           unusable before D53 builds the panel that creates the binding
+           in the first place. */
+    if (db) {
+      const boundEvidenceModelIds = (db.evidenceModels || [])
+        .filter((em) =>
+          (em.statisticalModels || []).some(
+            (sm) =>
+              (sm?.type === "dina" || sm?.type === "gdina") &&
+              sm?.structureConfig?.qMatrixId === qMatrixModel.id
+          )
+        )
+        .map((em) => em.id);
+
+      if (boundEvidenceModelIds.length > 0) {
+        const placedItemIds = new Set(
+          (qMatrixModel.entries || []).map((e) => e?.itemId).filter(Boolean)
+        );
+
+        const unplaced = (db.items || [])
+          .filter(
+            (it) =>
+              boundEvidenceModelIds.includes(it.evidenceModelId) &&
+              ["confirmed", "operational"].includes(it.status) &&
+              !placedItemIds.has(it.id)
+          )
+          .map((it) => it.id);
+
+        if (unplaced.length > 0) {
+          errors.push(
+            `Q-matrix does not place ${unplaced.length} item(s) that a bound diagnostic model will score: ${unplaced.join(", ")}. Every item must require at least one attribute, or it contributes no diagnostic information. Add a row for each, or unbind the item from this model's Evidence Model.`
+          );
+        }
+      }
+    }
   }
 
   /* ACTIVATION */

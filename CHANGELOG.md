@@ -16,10 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Q-matrix validity rules (D52, partial): client-side checks for all-zero rows
   (blocking), duplicate rows, weak identifiability, and low attribute-item
   coverage (all advisory), shown live in the editor grid.
+- Q-matrix confirmation now checks, on the server, that every item a bound
+  diagnostic model will actually score has been given at least one attribute.
+  An item that requires no attribute contributes nothing to a diagnosis, and
+  the scoring engine already discards such responses — this catches it while
+  the matrix is being authored instead.
 
 ### Changed
 
-- N/A
+- Q-matrix editor: the Competency Model picker now only lists models that
+  declare at least one binary Student Model Variable, since a Q-matrix has
+  nothing to bind to otherwise. Previously any competency model could be
+  selected, including ones a Q-matrix could never actually be built from.
 
 ### Deprecated
 
@@ -33,6 +41,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Q-matrix duplicate-row check corrected from blocking to advisory, matching
   the D52 spec.
+- A Q-matrix used by a diagnostic (DINA/G-DINA) evidence model can no longer
+  be deleted. The check that was meant to prevent this had been looking in
+  the wrong place since it was written, so it never actually blocked
+  anything, and deleting such a Q-matrix left the evidence model pointing at
+  a record that no longer existed.
+- A confirmed Q-matrix can no longer be deleted at all. It defines what every
+  attribute-mastery result ever scored against it means, so it is archived
+  rather than destroyed — the same rule confirmed items already follow.
 - Q-matrix editor: "Save for Review" no longer silently does nothing on a
   brand-new Q-matrix. It previously required two clicks to actually save
   the record for review, with no error shown on the first attempt.
@@ -47,21 +63,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known gaps (carried forward, see progress ledger)
 
-- No server-side strict validator for the Q-matrix's *advisory* rules
-  (duplicate rows, weak identifiability, low coverage) — by design, since
-  those rules are advisory-only and never meant to block. The one
-  *blocking* rule (all-zero rows) is no longer a gap: it's now enforced
-  client-side at save time, not just at confirm time, so it can't reach
-  the server unresolved (see Fixed, above). Referential integrity
-  (unknown/undeclared items and attributes, duplicate entries) was
-  confirmed this session to already be enforced server-side.
-- Q-matrix item scoping uses the item's evidence-model chain, not a bound
-  Task Model as the original spec described; this premise is unresolved.
-- A live browser walkthrough of the Q-matrix editor has now been run
-  (this session) — see `claude/day52-w11-live-browser-walkthrough.md`.
-  The remaining D51/D52 debt is: no binary-SMV filter on the Competency
-  Model picker, no virtualization, no keyboard interaction, and the item-
-  scoping premise above.
+- The Q-matrix's *advisory* rules (duplicate rows, weak identifiability,
+  low coverage) have no server-side equivalent — by design, since they are
+  advisory and were never meant to block. The one *blocking* rule is now
+  enforced on both sides, with a test asserting the two agree.
+- Q-matrix item scoping uses the item's evidence-model chain rather than a
+  "bound Task Model." **Resolved:** the original spec sentence was a layer
+  confusion — in ECD the Task Model is the task *environment*, while which
+  items belong together is the Assembly Model's role and the matrix itself
+  belongs to the Evidence Model's measurement model. The existing scoping
+  matches what the scoring engine already enforces. See
+  `claude/day52c-qmatrix-item-row-premise.md`.
+- A live browser walkthrough of the Q-matrix editor has now been run —
+  see `claude/day52-w11-live-browser-walkthrough.md`.
+- The Q-matrix editor stays a tab on the Admin page rather than a
+  dedicated route — a deliberate decision, not an oversight; see
+  `claude/day52b-qmatrix-route-decision.md`.
+- There is no district-facing read-only Q-matrix view, though the UI
+  specification calls for one. Newly recorded, not previously tracked.
+- Remaining D51/D52 debt: no virtualization and no keyboard interaction in
+  the grid.
 
 ## [1.0.0] - 2026-09-10
 

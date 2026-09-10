@@ -39,6 +39,14 @@ import {
   useTransitionQMatrixModel,
 } from "@/api/queries/qMatrixModels";
 
+// Exported (not just used inline) so the filter itself is a plain,
+// unit-testable function -- same reasoning QMatrixValidity.js gives for
+// living outside the component: no need to mount QMatrixEditor's full
+// React-Query-backed tree just to check a predicate over plain objects.
+export function hasBinarySmVariable(model) {
+  return (model?.smVariables || []).some((v) => v.type === "binary");
+}
+
 const emptyDraft = () => ({
   id: undefined,
   name: "",
@@ -94,6 +102,31 @@ export default function QMatrixEditor({ qMatrixId, onCancel, onSaved }) {
   const availableAttributes = (competencyModel?.smVariables || []).filter(
     (v) => v.type === "binary"
   );
+
+  // Standing work order item 1: a competency model with no binary SMVs has
+  // nothing a Q-matrix could bind to (attributeIds are validated server-side
+  // as binary-SMV ids -- see schema.js's qMatrixModels block), so offering
+  // it in this picker only sets an author up to pick it, see an empty
+  // "declares no binary Student Model Variables" notice below, and have to
+  // start over. Filtered here rather than left to that dead end.
+  const competencyModelOptions = useMemo(() => {
+    const eligible = competencyModels.filter(hasBinarySmVariable);
+    // The field disables itself once a record exists (see the Combobox's
+    // own `disabled` prop below), so this filter can never strand an
+    // existing Q-matrix mid-edit -- but the Combobox still needs the bound
+    // model IN its options to resolve `value` to a label at all (otherwise
+    // it falls back to showing the placeholder instead of the model's
+    // name). Keep the current selection visible even if it wouldn't
+    // qualify as a fresh pick.
+    if (
+      draft.competencyModelId &&
+      !eligible.some((m) => m.id === draft.competencyModelId) &&
+      competencyModel
+    ) {
+      return [...eligible, competencyModel];
+    }
+    return eligible;
+  }, [competencyModels, draft.competencyModelId, competencyModel]);
 
   const scopedItems = useMemo(() => {
     if (!draft.competencyModelId) return [];
@@ -293,7 +326,7 @@ export default function QMatrixEditor({ qMatrixId, onCancel, onSaved }) {
           <div>
             <label className="text-label font-medium text-slate-600">Competency Model</label>
             <Combobox
-              options={competencyModels.map((m) => ({ value: m.id, label: m.name }))}
+              options={competencyModelOptions.map((m) => ({ value: m.id, label: m.name }))}
               value={draft.competencyModelId}
               onValueChange={(value) => {
                 if (locked) return;
