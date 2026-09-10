@@ -1,0 +1,32 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+- New feature description goes here.
+
+### Changed
+- Changes to existing functionality.
+
+### Deprecated
+- Soon-to-be removed features.
+
+### Removed
+- Features removed in this release.
+
+### Fixed
+- Bug fixes.
+
+### Security
+- Vulnerability fixes.
+
+## [1.0.0] - 2026-09-10
+
+### Added
+- Initial project release with core features.
+- Initial setup, configuration files, and documentation.
