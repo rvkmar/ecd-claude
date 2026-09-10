@@ -14,7 +14,7 @@ import { apiErrorMessage } from "@/api/apiClient";
 import { useCompetencyModels } from "@/api/queries/competencies";
 import { useQMatrixModels, useDeleteQMatrixModel } from "@/api/queries/qMatrixModels";
 
-export default function QMatrixList({ onCreate, onEdit }) {
+export default function QMatrixList({ onCreate, onEdit, readOnly = false }) {
   const { data: qMatrices = [], isLoading } = useQMatrixModels();
   const { data: competencyModels = [] } = useCompetencyModels();
   const deleteMutation = useDeleteQMatrixModel();
@@ -36,9 +36,17 @@ export default function QMatrixList({ onCreate, onEdit }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
-        <Button onClick={onCreate}>+ New Q-Matrix</Button>
-      </div>
+      {/* Read-only (district) sees no authoring affordances at all: no
+          create, no delete, and the row action reads "View" rather than
+          "Edit"/"Review". Hiding rather than disabling is deliberate — a
+          disabled New button invites "why can't I?", whereas a district
+          user is not a blocked author, they are a legitimate reader of a
+          spec somebody else owns. */}
+      {!readOnly && (
+        <div className="flex justify-end">
+          <Button onClick={onCreate}>+ New Q-Matrix</Button>
+        </div>
+      )}
 
       {qMatrices.length === 0 ? (
         <p className="text-sm text-slate-500">No Q-matrices yet.</p>
@@ -67,9 +75,9 @@ export default function QMatrixList({ onCreate, onEdit }) {
                   </td>
                   <td className="px-4 py-2 text-right">
                     <Button variant="outline" size="sm" onClick={() => onEdit(qm.id)}>
-                      {qm.status === "draft" ? "Edit" : "Review"}
+                      {readOnly ? "View" : qm.status === "draft" ? "Edit" : "Review"}
                     </Button>
-                    {!qm.locked && (
+                    {!readOnly && !qm.locked && (
                       <Button
                         variant="ghost"
                         size="sm"

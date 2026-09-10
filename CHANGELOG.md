@@ -32,6 +32,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   An item that requires no attribute contributes nothing to a diagnosis, and
   the scoring engine already discards such responses — this catches it while
   the matrix is being authored instead.
+- District users can now see the Q-matrices their sessions are scored against,
+  read-only, as a "Q-Matrix" tab on the District Dashboard and at the
+  spec-named route `/district/q-matrices`. A district user gets no authoring
+  affordance anywhere in the surface — no create, no delete, the row action
+  reads "View", and every field and grid cell is disabled — but the structure
+  stays fully legible: headers, per-row attribute counts and validity
+  findings all remain. The server has always refused non-admin writes here;
+  this stops the UI offering a button the server would refuse.
 
 ### Changed
 
@@ -78,6 +86,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   low coverage) have no server-side equivalent — by design, since they are
   advisory and were never meant to block. The one *blocking* rule is now
   enforced on both sides, with a test asserting the two agree.
+- `/district/competencies`, `/district/tasks` and `/district/questions` are
+  routed but have no inbound link anywhere in the app, so nothing but a typed
+  URL reaches them. `/district/q-matrices` was given a dashboard tab as well
+  as a route for exactly this reason; the other three are still unreachable.
 - Q-matrix item scoping uses the item's evidence-model chain rather than a
   "bound Task Model." **Resolved:** the original spec sentence was a layer
   confusion — in ECD the Task Model is the task *environment*, while which

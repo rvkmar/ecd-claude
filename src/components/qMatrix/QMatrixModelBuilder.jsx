@@ -10,13 +10,14 @@ import React, { useState } from "react";
 import QMatrixList from "./QMatrixList";
 import QMatrixEditor from "./QMatrixEditor";
 
-export default function QMatrixModelBuilder() {
+export default function QMatrixModelBuilder({ readOnly = false }) {
   const [view, setView] = useState({ mode: "list" }); // { mode: "list" } | { mode: "editor", id?: string }
 
   if (view.mode === "editor") {
     return (
       <QMatrixEditor
         qMatrixId={view.id}
+        readOnly={readOnly}
         onCancel={() => setView({ mode: "list" })}
         onSaved={() => setView({ mode: "list" })}
       />
@@ -25,7 +26,8 @@ export default function QMatrixModelBuilder() {
 
   return (
     <QMatrixList
-      onCreate={() => setView({ mode: "editor" })}
+      readOnly={readOnly}
+      onCreate={readOnly ? undefined : () => setView({ mode: "editor" })}
       onEdit={(id) => setView({ mode: "editor", id })}
     />
   );

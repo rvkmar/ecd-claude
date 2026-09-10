@@ -21,6 +21,7 @@ import QuestionBankTabs from "./components/questions/QuestionBankTabs";
 import CompetencyModelBuilder from "./components/competencies/CompetencyModelBuilder";
 import EvidenceModelBuilder from "./components/evidences/EvidenceModelBuilder";
 import TaskModelBuilder from "./components/taskModels/TaskModelBuilder";
+import QMatrixModelBuilder from "./components/qMatrix/QMatrixModelBuilder";
 import TasksManager from "./components/tasks/TasksManager";
 import SessionBuilder from "./components/sessions/SessionBuilder";
 import SessionPlayer from "./components/sessions/SessionPlayer";
@@ -120,6 +121,11 @@ export default function App() {
                     <Route path="evidence/*" element={<EvidenceRoutes />} />
                     <Route path="tasks" element={<TaskModelBuilder />} />
                     <Route path="questions" element={<QuestionBankTabs />} />
+                    {/* UI spec §2.1 names this route explicitly, read-only
+                        for district. The DistrictDashboard "Q-Matrix" tab is
+                        the reachable entry point — this is the addressable
+                        one, for links and bookmarks. */}
+                    <Route path="q-matrices" element={<QMatrixModelBuilder readOnly />} />
                     <Route path="manage-tasks" element={<TasksManager />} />
                     <Route path="sessions/build" element={<SessionBuilder />} />
                     <Route path="sessions/play" element={<SessionPlayer />} />

@@ -59,7 +59,7 @@ const emptyDraft = () => ({
   locked: false,
 });
 
-export default function QMatrixEditor({ qMatrixId, onCancel, onSaved }) {
+export default function QMatrixEditor({ qMatrixId, onCancel, onSaved, readOnly = false }) {
   const isEditing = Boolean(qMatrixId);
   const { data: existing, isLoading: loadingExisting } = useQMatrixModel(qMatrixId, {
     enabled: isEditing,
@@ -155,7 +155,23 @@ export default function QMatrixEditor({ qMatrixId, onCancel, onSaved }) {
     [draft.attributeIds, includedItems, draft.entries]
   );
 
-  const locked = draft.locked === true;
+  /* `readOnly` is the DISTRICT view (UI spec §2.1 names /district/q-matrices
+     as read-only for district; rolePermissions.js has granted district
+     canView-but-not-canEdit on qMatrixModels since D48, with the reason
+     stated there: a Q-matrix is a system-level measurement decision, not
+     local authoring).
+
+     It folds into `locked` rather than becoming a second flag threaded
+     through every control. Everything that must not be operable already
+     keys off `locked` — every mutating handler's guard, the Combobox and
+     Inputs' `disabled`, the grid's own `readOnly`, and WizardStepContainer's
+     `canEdit` (which gates Save / Lock & Confirm / Return-to-draft). One
+     derivation means a control cannot be added later that honours `locked`
+     but forgets `readOnly`. The server is the real boundary regardless —
+     qMatrixModelsRoutes.js gates every write with authorizeRole(["admin"]) —
+     but a UI that offers a district user a button the server will refuse is
+     the "message must say what to do" defect in reverse. */
+  const locked = readOnly || draft.locked === true;
 
   function patchDraft(patch) {
     setDraft((d) => ({ ...d, ...patch }));
