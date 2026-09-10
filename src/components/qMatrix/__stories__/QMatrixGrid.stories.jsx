@@ -36,12 +36,24 @@ export const Default = {
       });
     };
 
+    // Without this the grid renders but shift-click and Shift+Space do
+    // nothing, so the interaction model would be unreviewable in the one
+    // place a designer would actually try it.
+    const onSetCells = (cells, nextChecked) => {
+      setEntries((prev) => {
+        const inRange = new Set(cells.map((c) => `${c.itemId}::${c.attributeId}`));
+        const kept = prev.filter((e) => !inRange.has(`${e.itemId}::${e.attributeId}`));
+        return nextChecked ? [...kept, ...cells] : kept;
+      });
+    };
+
     return (
       <QMatrixGrid
         attributes={attributes}
         items={items}
         entries={entries}
         onToggleCell={onToggleCell}
+        onSetCells={onSetCells}
         onRemoveItem={() => {}}
       />
     );

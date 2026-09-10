@@ -199,6 +199,28 @@ export default function QMatrixEditor({ qMatrixId, onCancel, onSaved }) {
     });
   }
 
+  /* Range select (shift-click / Shift+Space in the grid) sets a whole
+     rectangle of cells to one value in a SINGLE update. It is not a loop
+     over toggleCell, and must not become one: toggleCell derives its next
+     entries[] from the `draft` it closed over, so in a loop every
+     iteration after the first would read pre-loop state and all but the
+     last cell would be silently dropped. Same stale-closure family as the
+     "Save for Review" no-op fixed earlier this block. */
+  function setCells(cells, nextChecked) {
+    if (locked || !cells?.length) return;
+
+    const inRange = new Set(cells.map((c) => `${c.itemId}::${c.attributeId}`));
+    const kept = draft.entries.filter(
+      (e) => !inRange.has(`${e.itemId}::${e.attributeId}`)
+    );
+
+    patchDraft({
+      entries: nextChecked
+        ? [...kept, ...cells.map((c) => ({ itemId: c.itemId, attributeId: c.attributeId }))]
+        : kept,
+    });
+  }
+
   // Save (draft -> reviewed) requires reviewed-level completeness, AND zero
   // D52 blocking errors (currently just "empty-row"). This second part
   // isn't optional: an item included with no checked attribute cells
@@ -410,6 +432,7 @@ export default function QMatrixEditor({ qMatrixId, onCancel, onSaved }) {
                   items={includedItems}
                   entries={draft.entries}
                   onToggleCell={toggleCell}
+                  onSetCells={setCells}
                   onRemoveItem={removeItem}
                   readOnly={locked}
                   rowErrors={validity.errors}

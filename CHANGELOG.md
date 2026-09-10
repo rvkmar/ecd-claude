@@ -16,6 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Q-matrix validity rules (D52, partial): client-side checks for all-zero rows
   (blocking), duplicate rows, weak identifiability, and low attribute-item
   coverage (all advisory), shown live in the editor grid.
+- The Q-matrix grid is now fully keyboard-operable. Arrow keys move between
+  cells, space toggles one, and a block of cells can be filled or cleared at
+  once — by shift-clicking, or with shift+space for anyone not using a mouse.
+  The grid is a single tab stop rather than one per cell, so crossing a large
+  matrix no longer takes a press per checkbox.
+- The Q-matrix grid now exposes its row and column headers to screen readers
+  and announces each cell change, including how many cells a block selection
+  affected.
+- Each Q-matrix row now shows how many attributes it requires, so an item
+  that requires none is readable as a plain "0" rather than only as a red
+  row.
 - Q-matrix confirmation now checks, on the server, that every item a bound
   diagnostic model will actually score has been given at least one attribute.
   An item that requires no attribute contributes nothing to a diagnosis, and
@@ -81,8 +92,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `claude/day52b-qmatrix-route-decision.md`.
 - There is no district-facing read-only Q-matrix view, though the UI
   specification calls for one. Newly recorded, not previously tracked.
-- Remaining D51/D52 debt: no virtualization and no keyboard interaction in
-  the grid.
+- Remaining D51 debt: the grid is not virtualised above a stated row count.
 
 ## [1.0.0] - 2026-09-10
 
