@@ -21,6 +21,7 @@ import ItemBankAdmin from "@/components/itemBank/ItemBankAdmin";
 import CompetencyModelBuilder from "@/components/competencies/CompetencyModelBuilder";
 import EvidenceModelBuilder from "@/components/evidences/EvidenceModelBuilder";
 import TaskModelBuilder from "@/components/taskModels/TaskModelBuilder";
+import QMatrixModelBuilder from "@/components/qMatrix/QMatrixModelBuilder";
 import AnalyticsReports from "@/components/reports/AnalyticsReports";
 // Users, Policies, and Settings moved to /admin/settings (SettingsPage) --
 // see src/pages/SettingsPage.jsx. This page keeps only the
@@ -60,6 +61,7 @@ export default function AdminPage() {
             <TabsTrigger value="competencies">Competency Model</TabsTrigger>
             <TabsTrigger value="evidence">Evidence Model</TabsTrigger>
             <TabsTrigger value="tasks">Task Model</TabsTrigger>
+            <TabsTrigger value="qmatrix">Q-Matrix</TabsTrigger>
             <TabsTrigger value="itembank">Item Bank</TabsTrigger>
             <TabsTrigger value="analytics">Analytics</TabsTrigger>
           </TabsList>
@@ -82,6 +84,11 @@ export default function AdminPage() {
           {/* Task Models */}
           <TabsContent value="tasks" className="bg-white rounded-2xl shadow p-6">
             <TaskModelBuilder />
+          </TabsContent>
+
+          {/* Q-Matrix */}
+          <TabsContent value="qmatrix" className="bg-white rounded-2xl shadow p-6">
+            <QMatrixModelBuilder />
           </TabsContent>
 
           {/* Analytics */}
