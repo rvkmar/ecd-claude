@@ -51,6 +51,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stays fully legible: headers, per-row attribute counts and validity
   findings all remain. The server has always refused non-admin writes here;
   this stops the UI offering a button the server would refuse.
+- A `dina`-scored item can now be delivered and scored before its Evidence
+  Model has any calibrated parameters. An author sets a pilot slip/guess
+  pair on the item; a session response scored against it is tagged with
+  where its numbers came from and keeps a permanent snapshot of the exact
+  pilot values used, so a later calibration or a later edit to the item's
+  own pilot values never silently changes what an already-scored response
+  meant. `gdina` still has no pilot path — its calibrated parameters are a
+  probability table, not a fixed pair, and authoring one is a separate,
+  larger piece of work.
+- Assembly Models — the layer that decides which items and how many a test
+  actually assembles from — can now be authored end-to-end in the Admin UI
+  at `/admin/assembly-models`: identity, per-attribute targets, stopping
+  rules, and a selection algorithm bound to a policy, with a readiness
+  review before confirming. The underlying schema, routes and validation
+  already existed; this is the first UI to reach them.
 
 ### Changed
 
@@ -76,6 +91,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the wrong place since it was written, so it never actually blocked
   anything, and deleting such a Q-matrix left the evidence model pointing at
   a record that no longer existed.
+- A diagnostic (DINA/G-DINA) Evidence Model can no longer cite a draft or
+  archived Q-matrix and reach `confirmed`. The structural check already
+  required a Q-matrix's attributes to be binary; it now also requires the
+  Q-matrix itself to be confirmed, operational or suspended, matching every
+  other parent-lifecycle rule in the authoring chain.
+- The nginx Docker image no longer picks up the host machine's own
+  `node_modules`, `dist/` and `.git` when building — a missing
+  `.dockerignore` meant the build could silently ship the wrong, host-native
+  binaries (and hundreds of extra MB) instead of the ones just installed
+  inside the container.
+- The Assembly Model wizard no longer saves a draft on leaving its first two
+  steps, before a selection algorithm has been chosen. Every save this
+  wizard makes requires a selection algorithm to already be set, so the
+  earlier auto-save attempt was always refused by the server with a
+  confusing error; the first save now correctly waits until that step is
+  complete.
 - A confirmed Q-matrix can no longer be deleted at all. It defines what every
   attribute-mastery result ever scored against it means, so it is archived
   rather than destroyed — the same rule confirmed items already follow.
@@ -101,15 +132,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   routed but have no inbound link anywhere in the app, so nothing but a typed
   URL reaches them. `/district/q-matrices` was given a dashboard tab as well
   as a route for exactly this reason; the other three are still unreachable.
-- A diagnostic Evidence Model can cite a **draft or archived** Q-matrix and
-  still reach `confirmed`. Nothing validates the bound Q-matrix's lifecycle
-  status — only that it exists and that its attributes are binary — so the
-  "no draft parent" rule the rest of the authoring chain enforces does not
-  apply here. Found by walking D53's new binding control.
-- Diagnostic models cannot score on pilot parameters: no item-level slip /
-  guess (or G-DINA probability-table) field exists, so a DINA model is
-  authorable and confirmable but scores only once calibrated. The
-  accumulator already refuses this case with a message naming it.
+- Diagnostic models still cannot score `gdina` on pilot parameters: its
+  calibrated parameters are a probability table sized to each item's own
+  required-attribute count, not a fixed pair, and authoring that table is
+  its own piece of work. `dina` now has a pilot path (see Added, above).
+- Creating an item through the API with its pilot DINA slip/guess values
+  already set in the same request silently drops them — only a follow-up
+  edit persists them. Not believed to be reachable through the Item Wizard
+  itself, which sets this field on a later step's own save, but worth
+  fixing at the source.
 - Q-matrix item scoping uses the item's evidence-model chain rather than a
   "bound Task Model." **Resolved:** the original spec sentence was a layer
   confusion — in ECD the Task Model is the task *environment*, while which
