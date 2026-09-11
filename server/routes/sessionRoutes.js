@@ -13,6 +13,10 @@ import {
 } from "../delivery/evidenceAccumulation.js";
 import { dinaParametersAreUsable } from "../delivery/attributeAccumulation.js";
 import { resolveAssemblyProgress } from "../delivery/assemblyProgress.js";
+// D56: Activity Selection. /next-task's whole strategy block used to live
+// inline below; it now lives in one module that reads the composite library
+// and the live posteriors instead of db.questions. See that file's header.
+import { selectNextActivity } from "../delivery/activitySelection.js";
 import { recordItemUsage } from "../utils/itemExposure.js";
 // D49b: `import { log2 } from "mathjs"` stood here and was NEVER CALLED --
 // entropy() below has always used the native Math.log2. It was mathjs's only
@@ -31,10 +35,10 @@ import { recordItemUsage } from "../utils/itemExposure.js";
 // if the new path misbehaves, for one release, per the plan.
 const ITEM_DELIVERY_ENABLED = process.env.ITEM_DELIVERY_ENABLED !== "false";
 
-function entropy(p) {
-  if (p <= 0 || p >= 1) return 0;
-  return -p * Math.log2(p) - (1 - p) * Math.log2(1 - p);
-}
+// D56: `entropy()` stood here and served only the BayesianNetwork branch of
+// /next-task. That branch now lives in delivery/activitySelection.js, and
+// the helper moved with it rather than being left behind as a second
+// definition nothing calls.
 
 const router = express.Router();
 
@@ -611,121 +615,13 @@ router.get("/:id/next-task", (req, res) => {
   const session = db.sessions.find(s => s.id === req.params.id && !s.isCompleted);
   if (!session) return res.json({});
 
-  // Sequential strategy
-  if (session.selectionStrategy === "fixed") {
-    if (session.currentTaskIndex < session.taskIds.length) {
-      return res.json({
-        taskId: session.taskIds[session.currentTaskIndex],
-        strategy: "fixed",
-        debug: { index: session.currentTaskIndex }
-      });
-    }
-    return res.json({});
-  }
-
-  // IRT strategy
-  if (session.selectionStrategy === "IRT") {
-    const theta = session.studentModel?.irtTheta ?? 0;
-    let bestTask = null;
-    let bestDiff = Infinity;
-    let debugInfo = {};
-
-    for (const tid of session.taskIds) {
-      if (session.responses.some(r => r.taskId === tid)) continue;
-      const task = db.tasks.find(t => t.id === tid);
-      if (!task) continue;
-
-      const q = db.questions.find(qq => qq.id === task.questionId);
-      if (!q) continue;
-
-      const b = q.metadata?.b;
-      if (typeof b !== "number") continue;
-
-      const diff = Math.abs(b - theta);
-      if (diff < bestDiff) {
-        bestDiff = diff;
-        bestTask = task;
-        debugInfo = { theta, b, diff };
-      }
-    }
-
-    return bestTask
-      ? res.json({ taskId: bestTask.id, strategy: "IRT", debug: debugInfo })
-      : res.json({});
-  }
-
-  // Bayesian Network strategy
-  if (session.selectionStrategy === "BayesianNetwork") {
-    let bestTask = null;
-    let bestGain = -Infinity;
-    let debugInfo = {};
-
-    for (const tid of session.taskIds) {
-      if (session.responses.some(r => r.taskId === tid)) continue;
-      const task = db.tasks.find(t => t.id === tid);
-      if (!task) continue;
-
-      const taskModel = db.taskModels.find(tm => tm.id === task.taskModelId);
-      if (!taskModel) continue;
-
-      let gain = 0;
-      let obsDebug = [];
-
-      for (const emId of taskModel.evidenceModelIds || []) {
-        const em = db.evidenceModels.find(m => m.id === emId);
-        if (!em || em.measurementModel?.type !== "BayesianNetwork") continue;
-
-        const CPTs = em.measurementModel.bayesianConfig?.CPTs || {};
-        for (const eo of taskModel.expectedObservations || []) {
-          const obs = em.observations.find(o => o.id === eo.observationId);
-          if (!obs) continue;
-
-          const nodeId = obs.id;
-          const prior = session.studentModel?.bnPosteriors?.[nodeId] ?? 0.5;
-          const nodeCPT = CPTs[nodeId];
-          if (!nodeCPT) continue;
-
-          // Prior entropy
-          const Hprior = entropy(prior);
-
-          // CPT: { "true": P(obs=1|node=1), "false": P(obs=1|node=0) }
-          const pObsGivenNode1 = nodeCPT["true"] ?? 0.8;
-          const pObsGivenNode0 = nodeCPT["false"] ?? 0.2;
-
-          // Expected posterior after obs=1 and obs=0
-          const likelihood1 = pObsGivenNode1;
-          const likelihood0 = pObsGivenNode0;
-
-          // normalize
-          const norm = likelihood1 * prior + likelihood0 * (1 - prior);
-          const post1 = norm > 0 ? (likelihood1 * prior) / norm : prior;
-
-          const norm2 = (1 - pObsGivenNode1) * prior + (1 - pObsGivenNode0) * (1 - prior);
-          const post0 = norm2 > 0 ? ((1 - pObsGivenNode1) * prior) / norm2 : prior;
-
-          // Expected entropy
-          const Hexp = 0.5 * entropy(post1) + 0.5 * entropy(post0);
-          const infoGain = Hprior - Hexp;
-
-          // Info gain
-          gain += Hprior - Hexp;
-          obsDebug.push({ nodeId, prior, Hprior, post1, post0, Hexp, infoGain });
-        }
-      }
-
-      if (gain > bestGain) {
-        bestGain = gain;
-        bestTask = task;
-        debugInfo = { totalGain: gain, observations: obsDebug };
-      }
-    }
-
-    return bestTask
-      ? res.json({ taskId: bestTask.id, strategy: "BayesianNetwork", debug: debugInfo })
-      : res.json({});
-  }
-
-  return res.json({});
+  // D56: the three strategies (fixed / IRT / BayesianNetwork), the
+  // composite-library and live-posterior reads they now do, and Assembly
+  // Model stopping rules all live in delivery/activitySelection.js. This
+  // route's only remaining job is to resolve the session and hand back what
+  // that module decides -- the same response shape as before for every
+  // session that has no Assembly Model governing it.
+  return res.json(selectNextActivity(session, db));
 });
 
 // ------------------------------
