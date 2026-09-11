@@ -32,6 +32,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   An item that requires no attribute contributes nothing to a diagnosis, and
   the scoring engine already discards such responses — this catches it while
   the matrix is being authored instead.
+- Diagnostic (DINA / G-DINA) models can now be authored on the Evidence
+  Wizard (D53). Both families appear in the statistical-model picker for a
+  binary competency and nowhere else, matching what confirmation actually
+  accepts. The new configuration panel binds a Q-matrix and derives
+  everything else from it read-only: the attribute list with each
+  attribute's type and how many items require it, a note stating that
+  mastery patterns are ordered graded-lexicographically and why that is not
+  configurable, and — where the competency model declares a trait
+  perspective — an advisory that a diagnostic model classifies rather than
+  scales. The panel states plainly that slip and guess values are not
+  authorable yet, rather than implying a control that does not exist.
 - District users can now see the Q-matrices their sessions are scored against,
   read-only, as a "Q-Matrix" tab on the District Dashboard and at the
   spec-named route `/district/q-matrices`. A district user gets no authoring
@@ -90,6 +101,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   routed but have no inbound link anywhere in the app, so nothing but a typed
   URL reaches them. `/district/q-matrices` was given a dashboard tab as well
   as a route for exactly this reason; the other three are still unreachable.
+- A diagnostic Evidence Model can cite a **draft or archived** Q-matrix and
+  still reach `confirmed`. Nothing validates the bound Q-matrix's lifecycle
+  status — only that it exists and that its attributes are binary — so the
+  "no draft parent" rule the rest of the authoring chain enforces does not
+  apply here. Found by walking D53's new binding control.
+- Diagnostic models cannot score on pilot parameters: no item-level slip /
+  guess (or G-DINA probability-table) field exists, so a DINA model is
+  authorable and confirmable but scores only once calibrated. The
+  accumulator already refuses this case with a message naming it.
 - Q-matrix item scoping uses the item's evidence-model chain rather than a
   "bound Task Model." **Resolved:** the original spec sentence was a layer
   confusion — in ECD the Task Model is the task *environment*, while which
