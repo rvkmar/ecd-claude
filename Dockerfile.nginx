@@ -8,7 +8,7 @@ COPY package*.json ./
 # RUN npm ci
 # Force clean npm install and explicitly clear potential cached binaries
 RUN npm ci && npm cache clean --force
-RUN rm -rf node_modules/.vite node_modules/esbuild
+# RUN rm -rf node_modules/.vite node_modules/esbuild
 
 # Copy source
 COPY . .

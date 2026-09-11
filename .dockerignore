@@ -1,0 +1,27 @@
+# No .dockerignore existed before this (found live, D54 verification-walk
+# session: three successive `docker compose build [--no-cache] nginx`
+# attempts served a byte-identical bundle despite confirmed source changes
+# and a genuinely freshly-recreated container -- this file was the missing
+# piece, alongside a suspected stale Windows/WSL2 filesystem-bridge view of
+# the build context; see claude/progress-ledger.md).
+#
+# Without this, Dockerfile.nginx's `COPY . .` (which runs AFTER `RUN npm ci`)
+# drags the host's own node_modules, dist/, and .git into the build context
+# and OVERWRITES the container's just-installed, linux-correct node_modules
+# with the host's Windows-native one -- including esbuild's platform binary,
+# which the Dockerfile explicitly strips one line earlier
+# (`rm -rf node_modules/.vite node_modules/esbuild`) for exactly this reason,
+# but had nothing stopping it from coming right back via the unrestricted
+# COPY. It also means every build ships hundreds of MB of irrelevant host
+# state through the build context for no reason.
+node_modules
+dist
+.git
+.storybook
+storybook-static
+coverage
+*.log
+.env
+.env.*
+!.env.example
+.vscode

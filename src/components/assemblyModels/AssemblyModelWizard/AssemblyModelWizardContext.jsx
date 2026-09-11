@@ -195,16 +195,33 @@ export function AssemblyModelWizardProvider({ assemblyModelId, onSaved, children
 
   /* =====================================================
      PERSIST -- create or update, mirroring QMatrixEditor.persist().
+
+     Found live (D54 verification walk): schema.js's assemblyModels
+     validation runs stoppingRules' shape check whenever the KEY IS
+     PRESENT AT ALL, not only once it has real content -- stoppingRules
+     is optional before confirmation per validateAssemblyModelLifecycle,
+     but schema.js itself does not gate on status. Sending `stoppingRules:
+     {}` (this file's own emptyDraft() default) tripped "must declare at
+     least one of maxItems, minItems or targetsMet" on every save before
+     Step 3 had real content. Omit the key entirely (undefined, which
+     JSON.stringify drops) until at least one rule is actually set, the
+     same way selectionAlgorithm is only ever sent once it has a
+     policyId -- see AssemblyModelWizard.jsx's goNext() for why THAT one
+     is unconditionally required, not just optional-until-confirm.
   ===================================================== */
   async function persist() {
+    const sr = draft.stoppingRules || {};
+    const hasStoppingRule =
+      sr.maxItems !== undefined || sr.minItems !== undefined || sr.targetsMet !== undefined;
+
     const payload = {
       name: draft.name,
       description: draft.description,
       competencyModelId: draft.competencyModelId,
       competencyModelVersion: competencyModel?.versionNumber,
       targetsBySMV: draft.targetsBySMV,
-      stoppingRules: draft.stoppingRules,
-      selectionAlgorithm: draft.selectionAlgorithm,
+      stoppingRules: hasStoppingRule ? draft.stoppingRules : undefined,
+      selectionAlgorithm: draft.selectionAlgorithm?.policyId ? draft.selectionAlgorithm : undefined,
     };
 
     try {

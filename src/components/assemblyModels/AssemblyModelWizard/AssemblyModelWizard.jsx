@@ -46,11 +46,25 @@ export default function AssemblyModelWizard({ onCancel }) {
     isDirty,
   } = useAssemblyModelWizard();
 
-  // Same auto-save-on-Next convention as CompetencyWizard.jsx: the very
-  // first Next (leaving step 1) just advances since nothing is complete
-  // enough to persist yet on a brand-new draft; every Next after that
-  // silently saves first. A locked (confirmed+) record skips the save --
-  // paging through it is read-only review, not editing.
+  // NOT the same auto-save-on-every-Next convention CompetencyWizard.jsx
+  // uses. Found live (D54 verification walk, session 11 continuation):
+  // schema.js's assemblyModels validation requires selectionAlgorithm.
+  // policyId UNCONDITIONALLY on every save, draft included -- unlike
+  // every other entity this wizard shell serves, there is no "create the
+  // record now, fill in the rest across later steps" for this one. An
+  // auto-save attempted on leaving Step 2 or Step 3 (before Step 4 has
+  // set a policy) was refused by the server with "selectionAlgorithm.
+  // policyId is required." every time.
+  //
+  // So the very first persist cannot happen before Step 4 is complete.
+  // Steps 1-3 only ever hold local state; the gate below is keyed on
+  // whether the draft ACTUALLY has a policyId yet (not on step number),
+  // so it behaves correctly however the user navigates. Once a record
+  // exists -- either because this session just created it, or because an
+  // existing record was reopened for edit -- saves resume on every
+  // subsequent Next, matching the original convention. A locked
+  // (confirmed+) record skips the save entirely -- paging through it is
+  // read-only review, not editing.
   async function goNext() {
     if (!draft?.locked && !canProceed(currentStep)) {
       toast.error("Complete required fields before proceeding.");
@@ -58,7 +72,8 @@ export default function AssemblyModelWizard({ onCancel }) {
     }
 
     if (currentStep < STEP_CONFIG.length) {
-      if (currentStep > 1 && !draft?.locked) {
+      const canPersist = currentStep > 1 && Boolean(draft?.selectionAlgorithm?.policyId);
+      if (canPersist && !draft?.locked) {
         const ok = await saveDraft();
         if (!ok) return;
       }
