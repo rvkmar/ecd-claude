@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import Spinner from "@/components/ui/Spinner";
 import { useAuth } from "@/auth/AuthProvider";
+import { apiFetch } from "@/api/apiClient";
 import toast from "react-hot-toast";
 
 export default function AnalyticsReports() {
@@ -68,10 +69,11 @@ export default function AnalyticsReports() {
       if (filters.startDate) params.append("startDate", filters.startDate);
       if (filters.endDate) params.append("endDate", filters.endDate);
 
-      const res = await fetch(`/api/reports/dashboard?${params.toString()}`);
-      if (!res.ok) throw new Error("Failed to load analytics data");
-
-      const body = await res.json();
+      const body = await apiFetch(
+        `/api/reports/dashboard?${params.toString()}`,
+        {},
+        auth
+      );
       setData(body);
     } catch (err) {
       console.error(err);

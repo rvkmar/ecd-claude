@@ -395,3 +395,114 @@ describe("nothing is done until something calls it (server)", () => {
     ).toEqual([]);
   });
 });
+
+/* ============================================================
+   D46 — EVERY /api CALL GOES THROUGH apiFetch
+   ============================================================
+
+   Phase 2 of the data-layer consolidation: live src/ code must not call
+   fetch() against /api/* itself. The one allowed wrapper is
+   src/api/apiClient.js (apiFetch). Query hooks in src/api/queries/* call
+   apiFetch; screens either use those hooks or call apiFetch with auth
+   from useAuth().
+
+   AuthProvider.login was verified, not assumed: it must hit /api before a
+   token exists. apiFetch already omits Authorization when auth is absent,
+   so login goes through apiFetch with no token and does NOT need an
+   OPEN_BY_DESIGN entry. Add one only for a call that truly cannot use
+   apiFetch, with a written reason — same rule as the write-route guard.
+   ============================================================ */
+
+const OPEN_BY_DESIGN_RAW_API_FETCH = new Map([
+  // "<path relative to repo root>" -> why a raw fetch("/api…") is allowed.
+  // apiClient.js is not listed here: it is the wrapper, not an exception.
+]);
+
+const API_CLIENT_REL = "src/api/apiClient.js";
+
+function findRawApiFetches() {
+  const srcRoot = path.join(ROOT, "src");
+  const files = walkAllJs(srcRoot).filter((f) => !PROD_SKIP.test(f));
+  const offenders = [];
+  // Same-line: fetch("/api…") / fetch('/api…') / fetch(`/api…`)
+  // and the window.fetch form the deleted interceptor tests used.
+  const sameLine = /\b(?:window\.)?fetch\s*\(\s*(['"`])\/api\b/;
+  // Multiline: fetch(\n  "/api…")
+  const splitLine = /\b(?:window\.)?fetch\s*\(\s*[\r\n]\s*(['"`])\/api\b/;
+
+  for (const file of files) {
+    const rel = path.relative(ROOT, file).replace(/\\/g, "/");
+    if (rel === API_CLIENT_REL) continue;
+    if (OPEN_BY_DESIGN_RAW_API_FETCH.has(rel)) continue;
+
+    const text = liveCode(fs.readFileSync(file, "utf-8"));
+    const lines = text.split("\n");
+    lines.forEach((line, i) => {
+      if (sameLine.test(line)) offenders.push(`${rel}:${i + 1}`);
+    });
+    if (splitLine.test(text) && !lines.some((line) => sameLine.test(line))) {
+      const idx = text.search(/\b(?:window\.)?fetch\s*\(/);
+      const lineNo = text.slice(0, idx).split("\n").length;
+      offenders.push(`${rel}:${lineNo}`);
+    }
+  }
+  return offenders;
+}
+
+describe("every /api call goes through apiFetch", () => {
+  it("no live src/ file issues a raw fetch() to /api", () => {
+    const offenders = findRawApiFetches();
+
+    expect(
+      offenders,
+      `Raw fetch("/api…") in live src/ code. Route it through apiFetch ` +
+        `(or an existing hook in src/api/queries/) so the Authorization ` +
+        `header is attached in one place.\n\n` +
+        `apiClient.js is the only allowed wrapper. A call that truly cannot ` +
+        `use apiFetch belongs in OPEN_BY_DESIGN_RAW_API_FETCH with a reason.\n\n` +
+        offenders.join("\n")
+    ).toEqual([]);
+  });
+
+  it("the allowlist does not rot — a file that no longer raw-fetches /api leaves it", () => {
+    const srcRoot = path.join(ROOT, "src");
+    const files = new Set(
+      walkAllJs(srcRoot)
+        .filter((f) => !PROD_SKIP.test(f))
+        .map((f) => path.relative(ROOT, f).replace(/\\/g, "/"))
+    );
+    const stale = [...OPEN_BY_DESIGN_RAW_API_FETCH.keys()].filter((k) => !files.has(k));
+
+    expect(
+      stale,
+      `These are in OPEN_BY_DESIGN_RAW_API_FETCH but the file is gone. ` +
+        `Remove them or the list becomes a place exemptions hide:\n` +
+        stale.join("\n")
+    ).toEqual([]);
+  });
+
+  it("fails when a raw /api fetch is reintroduced, then passes once removed", () => {
+    const probeRel = "src/components/ui/__apifetch_guard_probe__.jsx";
+    const probe = path.join(ROOT, probeRel);
+    fs.writeFileSync(
+      probe,
+      `export function probe() {\n  return fetch("/api/foo");\n}\n`
+    );
+    try {
+      const withProbe = findRawApiFetches();
+      expect(
+        withProbe.some((o) => o.startsWith(probeRel)),
+        `Guard did not fail after inserting fetch("/api/foo") in a component. ` +
+          `Offenders were:\n${withProbe.join("\n")}`
+      ).toBe(true);
+    } finally {
+      fs.unlinkSync(probe);
+    }
+
+    const withoutProbe = findRawApiFetches();
+    expect(
+      withoutProbe.some((o) => o.startsWith(probeRel)),
+      "Guard still reported the probe after it was removed"
+    ).toBe(false);
+  });
+});

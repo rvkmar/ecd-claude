@@ -32,6 +32,8 @@ import BulkUploadPanel from "./settings/BulkUploadPanel";
 import BulkDownloadPanel from "./settings/BulkDownloadPanel";
 import ThemeToggle from "@/theme/ThemeToggle";
 import { useTheme } from "@/theme/ThemeProvider";
+import { useAuth } from "@/auth/AuthProvider";
+import { apiFetch, apiErrorMessage } from "@/api/apiClient";
 
 function AppearanceSettings() {
   const { resolvedTheme } = useTheme();
@@ -58,12 +60,13 @@ function AppearanceSettings() {
 }
 
 function SystemSettings() {
+  const { auth } = useAuth() || {};
   const handleClearAll = async () => {
     try {
-      await fetch("/api/admin/clear-all", { method: "POST" });
+      await apiFetch("/api/admin/clear-all", { method: "POST" }, auth);
       toast.success("All data cleared.");
-    } catch {
-      toast.error("Failed to clear data.");
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Failed to clear data."));
     }
   };
 

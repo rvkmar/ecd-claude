@@ -897,18 +897,18 @@ export default function QuestionEditor({
                   onClick={async () => {
                     try {
                       notify?.("⏳ Generating AIG variants...");
-                      const res = await fetch("/api/aig/generate", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                          templateId: aig.templateId,
-                          count: 5,
-                          difficulty: q.metadata.difficulty || "easy",
-                        }),
-                      });
-
-                      const data = await res.json();
-                      if (!res.ok) throw new Error(data.error || "AIG failed");
+                      const data = await apiFetch(
+                        "/api/aig/generate",
+                        {
+                          method: "POST",
+                          body: JSON.stringify({
+                            templateId: aig.templateId,
+                            count: 5,
+                            difficulty: q.metadata.difficulty || "easy",
+                          }),
+                        },
+                        auth
+                      );
 
                       notify?.(
                         `✅ Generated ${data.created} AIG questions`,
@@ -922,7 +922,10 @@ export default function QuestionEditor({
 
                     } catch (err) {
                       console.error(err);
-                      notify?.(`❌ AIG generation failed: ${err.message}`, "error");
+                      notify?.(
+                        `❌ AIG generation failed: ${apiErrorMessage(err, err.message || "AIG failed")}`,
+                        "error"
+                      );
                     }
                   }}
                 >

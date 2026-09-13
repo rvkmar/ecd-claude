@@ -2,6 +2,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { jwtDecode } from "jwt-decode";
+import { apiFetch, apiErrorMessage } from "../api/apiClient";
 
 const AuthContext = createContext(null);
 
@@ -58,22 +59,14 @@ export function AuthProvider({ children }) {
     }
 
     try {
-      const res = await fetch(LOGIN_URL, {
+      // Pre-auth on purpose: there is no token yet. apiFetch already omits
+      // Authorization when `auth` is absent (see apiClient.test.js), so
+      // login does not need a raw fetch() or a guard allowlist.
+      const data = await apiFetch(LOGIN_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password, role }),
       });
 
-      if (!res.ok) {
-        let errText = `Login failed (${res.status})`;
-        try {
-          const errBody = await res.json();
-          if (errBody?.error) errText = errBody.error;
-        } catch {}
-        throw new Error(errText);
-      }
-
-      const data = await res.json();
       const token = data.token;
 
       try {
@@ -89,7 +82,7 @@ export function AuthProvider({ children }) {
       setAuth({ username: data.username, role: data.role, token });
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ username: data.username, role: data.role, token }));
     } catch (err) {
-      throw new Error(err?.message || "Network/Server error");
+      throw new Error(apiErrorMessage(err, err?.message || "Network/Server error"));
     }
   };
 

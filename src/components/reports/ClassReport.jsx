@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from "react";
+import { useAuth } from "@/auth/AuthProvider";
+import { apiFetch, apiErrorMessage } from "@/api/apiClient";
 
 export default function ClassReport({ classId, onClose }) {
+  const { auth } = useAuth() || {};
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -8,13 +11,9 @@ export default function ClassReport({ classId, onClose }) {
   useEffect(() => {
     if (!classId) return;
     setLoading(true);
-    fetch(`/api/reports/teacher/class/${classId}`)
-      .then((r) => {
-        if (!r.ok) throw new Error("Failed to fetch class report");
-        return r.json();
-      })
+    apiFetch(`/api/reports/teacher/class/${classId}`, {}, auth)
       .then((data) => setReport(data))
-      .catch((err) => setError(err.message))
+      .catch((err) => setError(apiErrorMessage(err, "Failed to fetch class report")))
       .finally(() => setLoading(false));
   }, [classId]);
 
