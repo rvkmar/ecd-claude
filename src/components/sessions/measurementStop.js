@@ -12,6 +12,10 @@ const RULE_HEADINGS = {
 
 export function measurementStopHeading(stopped) {
   if (!stopped?.rule) return "Session stopped";
+  if (stopped.rule === "targetsMet") {
+    const n = Array.isArray(stopped.targets) ? stopped.targets.length : 0;
+    return n > 1 ? "Measurement targets met" : RULE_HEADINGS.targetsMet;
+  }
   return RULE_HEADINGS[stopped.rule] || "Session stopped";
 }
 

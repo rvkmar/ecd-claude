@@ -4,10 +4,12 @@
 // (Day 17 -- `assemblyModels.targetsBySMV`) alongside a freshly-accumulated
 // posterior, so a caller can see progress toward a stopping criterion.
 //
-// Deliberately NOT a stopping decision. Activity Selection / stopping
-// rules are Week 11 scope; this module only ANSWERS "how close is this
-// SMV to its stated target right now", and never decides whether to stop
-// presenting items. Nothing here is persisted -- it is computed fresh on
+// resolveAssemblyProgress is deliberately NOT a stopping decision -- it
+// answers "how close is this SMV to its stated target right now" for SMVs
+// that already have a supported posterior. evaluateDeclaredTargets is the
+// join Activity Selection uses to decide targetsMet: every entry in the
+// governing Assembly Model's targetsBySMV must appear in that progress
+// list and be met. Nothing here is persisted -- it is computed fresh on
 // every submit from whatever `accumulateEvidence()` just returned, and is
 // surfaced in the HTTP response only (see sessionRoutes.js).
 //
@@ -133,4 +135,74 @@ export function resolveAssemblyProgress(posteriors, db) {
   }
 
   return progress;
+}
+
+/**
+ * Join an Assembly Model's declared `targetsBySMV` against progress rows.
+ *
+ * `resolveAssemblyProgress` only emits a row for an SMV that already has a
+ * supported posterior. That is the right answer to "how close is this SMV
+ * right now", and the wrong answer to "have we measured everything we said
+ * we would": a declared target that never appears in `progress` is
+ * unscored, not vacuously met. Activity Selection's `targetsMet` rule uses
+ * this join so it cannot stop on "1 of 1 reported" when two targets were
+ * declared.
+ *
+ * `stoppingCriterionMet` stays tri-state. Only `true` counts as met. A
+ * missing row, `false`, or `null` (unevaluable -- wrong scale, malformed
+ * target) all mean "do not stop".
+ *
+ * @param {object} assemblyModel - the governing Assembly Model
+ * @param {object[]} progress - `resolveAssemblyProgress()` output
+ * @returns {{
+ *   declaredCount: number,
+ *   scoredCount: number,
+ *   metCount: number,
+ *   allScoredAndMet: boolean,
+ *   rows: object[],
+ * }}
+ */
+export function evaluateDeclaredTargets(assemblyModel, progress) {
+  const declared = [];
+  const seen = new Set();
+
+  for (const target of assemblyModel?.targetsBySMV || []) {
+    if (!target?.smvId || seen.has(target.smvId)) continue;
+    seen.add(target.smvId);
+    declared.push(target);
+  }
+
+  const bySmv = new Map();
+  for (const row of progress || []) {
+    if (!row?.smvId || bySmv.has(row.smvId)) continue;
+    // A progress row computed against a different Assembly Model is not
+    // evidence that THIS model's declared target was scored.
+    if (assemblyModel?.id && row.assemblyModelId && row.assemblyModelId !== assemblyModel.id) {
+      continue;
+    }
+    bySmv.set(row.smvId, row);
+  }
+
+  const rows = declared.map((target) => {
+    const progressRow = bySmv.get(target.smvId);
+    return {
+      smvId: target.smvId,
+      scored: Boolean(progressRow),
+      met: progressRow?.stoppingCriterionMet === true,
+      progress: progressRow,
+    };
+  });
+
+  const scoredCount = rows.filter((r) => r.scored).length;
+  const metCount = rows.filter((r) => r.met).length;
+
+  return {
+    declaredCount: declared.length,
+    scoredCount,
+    metCount,
+    /* Vacuous truth is the defect this exists to close: zero declared
+       targets is "nothing to evaluate", not "everything is met". */
+    allScoredAndMet: declared.length > 0 && metCount === declared.length,
+    rows,
+  };
 }

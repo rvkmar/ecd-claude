@@ -87,12 +87,13 @@
 // * It does not decide a mastery CLASSIFICATION itself. Day 57 built that
 //   rule in attributeClassification.js and assemblyProgress.js applies it,
 //   so a requiredClassificationAccuracy target now arrives here as a real
-//   boolean and flows through the `targetsMet` filter below unmodified --
-//   no change was needed in this module for diagnostic sessions to stop on
-//   their own targets. What still arrives as `null` is a target nobody
-//   could evaluate: a classification target against a posterior that is not
-//   a mastery probability, or a SEM target on an incomparable scale. null
-//   is still not true, and still never stops a session.
+//   boolean. The `targetsMet` filter then requires EVERY declared
+//   targetsBySMV entry to have such a row and to be `true` -- an SMV that
+//   never accumulated a posterior is not "vacuously met". What still
+//   arrives as `null` is a target nobody could evaluate: a classification
+//   target against a posterior that is not a mastery probability, or a SEM
+//   target on an incomparable scale. null is still not true, and still
+//   never stops a session.
 // * It does not override the session's own `selectionStrategy` with the
 //   Assembly Model's `selectionAlgorithm` pointer. A mismatch between the
 //   two is reported as a warning. D49a's own open decision settled this
@@ -114,7 +115,7 @@ import {
   itemParametersAreUsable,
   CONTINUOUS_MODEL_FAMILIES,
 } from "./evidenceAccumulation.js";
-import { resolveAssemblyProgress } from "./assemblyProgress.js";
+import { evaluateDeclaredTargets, resolveAssemblyProgress } from "./assemblyProgress.js";
 import { dinaParametersAreUsable } from "./attributeAccumulation.js";
 import { activePackageFor } from "../compositeLibrary/activePackage.js";
 
@@ -372,15 +373,19 @@ function resolveAssemblyModelForSession(session, db) {
  *   maxItems   -- a ceiling. Stop once this many responses are recorded.
  *   minItems   -- a floor. Never stops anything on its own; it only gates
  *                 targetsMet.
- *   targetsMet -- stop once EVERY reported target is met, and only at or
- *                 above minItems.
+ *   targetsMet -- stop once EVERY DECLARED target (assemblyModel
+ *                 .targetsBySMV) has an evaluable progress row and that
+ *                 row is met, and only at or above minItems. A declared
+ *                 SMV that never accumulated a posterior is unmet, not
+ *                 "absent so ignore it".
  *
  * `stoppingCriterionMet` is tri-state in assemblyProgress.js: true, false,
  * or null for a target nobody can evaluate (a SEM target on a scale it
  * cannot be compared against, or -- since D57 -- a classification target
  * against a posterior that is not a mastery probability). Only `true`
- * counts. An empty progress list also never stops a session -- "no targets
- * could be evaluated" is not "all targets met".
+ * counts. An empty progress list, or a declared target missing from
+ * progress, also never stops a session -- "no targets could be evaluated"
+ * is not "all targets met".
  */
 function evaluateStoppingRules(session, assemblyModel, db) {
   const stoppingRules = assemblyModel.stoppingRules || {};
@@ -427,43 +432,48 @@ function evaluateStoppingRules(session, assemblyModel, db) {
     return { warnings };
   }
 
-  if (progress.length === 0) return { warnings };
+  /* Declaration of record is the governing AM's targetsBySMV, not the
+     progress rows that happened to be reportable. resolveAssemblyProgress
+     omits an SMV with no supported posterior, which used to make
+     "unmet.length === 0" true for a one-attribute slice of a two-attribute
+     diagnostic. Prefer continuing (safe direction) until every declared
+     target is scored and met. */
+  const declared = evaluateDeclaredTargets(assemblyModel, progress);
 
-  const unmet = progress.filter((p) => p.stoppingCriterionMet !== true);
+  if (!declared.allScoredAndMet) return { warnings };
 
-  if (unmet.length === 0) {
-    return {
-      stop: {
-        rule: "targetsMet",
-        assemblyModelId: assemblyModel.id,
-        reason: `Every reported Assembly Model target is met (${progress.length} of ${progress.length}) at ${delivered} response(s).`,
-        /* Day 57: a diagnostic target reports what it actually met. Before
-           this, every stopped-session record named `requiredSEM` alone, so
-           a session stopped on a classification target reported
-           `requiredSEM: undefined` and said nothing about the mastery
-           decision that ended it. Both shapes are emitted only when
-           present, so a SEM stop is byte-identical to what it was. */
-        targets: progress.map((p) => {
-          const target = {
-            smvId: p.smvId,
-            estimate: p.estimate,
-            precision: p.precision,
-          };
-          if (p.requiredSEM !== undefined) target.requiredSEM = p.requiredSEM;
-          if (p.requiredClassificationAccuracy !== undefined) {
-            target.requiredClassificationAccuracy = p.requiredClassificationAccuracy;
-            target.classification = p.classification;
-            target.expectedClassificationAccuracy = p.expectedClassificationAccuracy;
-            target.masteryThreshold = p.masteryThreshold;
-          }
-          return target;
-        }),
-      },
-      warnings,
-    };
-  }
-
-  return { warnings };
+  return {
+    stop: {
+      rule: "targetsMet",
+      assemblyModelId: assemblyModel.id,
+      reason: `Every declared Assembly Model target is scored and met (${declared.metCount} of ${declared.declaredCount}) at ${delivered} response(s).`,
+      /* Day 57: a diagnostic target reports what it actually met. Before
+         this, every stopped-session record named `requiredSEM` alone, so
+         a session stopped on a classification target reported
+         `requiredSEM: undefined` and said nothing about the mastery
+         decision that ended it. Both shapes are emitted only when
+         present, so a SEM stop is byte-identical to what it was.
+         Ordered by the AM's declared targetsBySMV, not by whichever
+         posteriors happened to arrive first. */
+      targets: declared.rows.map((row) => {
+        const p = row.progress;
+        const target = {
+          smvId: p.smvId,
+          estimate: p.estimate,
+          precision: p.precision,
+        };
+        if (p.requiredSEM !== undefined) target.requiredSEM = p.requiredSEM;
+        if (p.requiredClassificationAccuracy !== undefined) {
+          target.requiredClassificationAccuracy = p.requiredClassificationAccuracy;
+          target.classification = p.classification;
+          target.expectedClassificationAccuracy = p.expectedClassificationAccuracy;
+          target.masteryThreshold = p.masteryThreshold;
+        }
+        return target;
+      }),
+    },
+    warnings,
+  };
 }
 
 /**

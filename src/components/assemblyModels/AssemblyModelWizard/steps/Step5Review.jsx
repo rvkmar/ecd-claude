@@ -73,7 +73,7 @@ export default function Step5Review() {
         <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
           {accuracyTargets.length} of {(draft.targetsBySMV || []).length} target(s)
           use requiredClassificationAccuracy. With stoppingRules.targetsMet,
-          a session ends once every such target is met at the stated confidence
+          a session ends once every declared target is scored and met at the stated confidence
           (D57/D58). That figure is this student&apos;s classification
           confidence, not a population classification-accuracy rate.
         </div>

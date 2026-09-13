@@ -26,7 +26,7 @@ vi.mock("../../../api/queries/policies", () => ({
 const STOPPED = {
   rule: "targetsMet",
   assemblyModelId: "am1",
-  reason: "Every reported Assembly Model target is met (1 of 1) at 1 response(s).",
+  reason: "Every declared Assembly Model target is scored and met (1 of 1) at 1 response(s).",
   targets: [
     {
       smvId: "attrA",
