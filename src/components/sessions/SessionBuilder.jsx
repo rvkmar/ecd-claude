@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import SessionList from "./SessionList";
 import SessionForm from "./SessionForm";
 import SessionReport from "./SessionReport";
 import NavBar from "../ui/NavBar";
 import { SESSION_STATUS } from "@/utils/sessionStatus";
+import { sessionPlayerPath } from "@/utils/sessionPlay";
 import Modal from "../ui/Modal";
 import toast from "react-hot-toast";
 import { useAuth } from "@/auth/AuthProvider";
@@ -15,6 +17,7 @@ import { apiFetch, apiErrorMessage } from "@/api/apiClient";
 
 export default function SessionBuilder({ notify }) {
   const { auth } = useAuth() || {};
+  const navigate = useNavigate();
   const [sessions, setSessions] = useState([]);
   const [students, setStudents] = useState([]);
   const [tasks, setTasks] = useState([]);
@@ -198,7 +201,16 @@ export default function SessionBuilder({ notify }) {
   };
 
   const handlePlay = (session) => {
-    window.location.href = `/sessions/${session.id}/player`;
+    // Must stay inside the role prefix. The unprefixed /sessions/:id/player
+    // URL is not a protected route — App.jsx's catch-all used to bounce it
+    // to /login (the staff Play "logout"). navigate() also avoids a full
+    // reload that would remount AuthProvider.
+    const path = sessionPlayerPath(auth?.role, session.id);
+    if (!path) {
+      notify?.("Cannot open this session for your role.");
+      return;
+    }
+    navigate(path);
   };
 
   const handleViewReport = (sessionId) => {

@@ -26,6 +26,7 @@ import AssemblyModelBuilder from "./components/assemblyModels/AssemblyModelBuild
 import TasksManager from "./components/tasks/TasksManager";
 import SessionBuilder from "./components/sessions/SessionBuilder";
 import SessionPlayer from "./components/sessions/SessionPlayer";
+import SessionPlayRedirect from "./components/sessions/SessionPlayRedirect";
 
 import Footer from "./components/ui/Footer";
 // import NavBar from "./components/ui/NavBar";
@@ -137,6 +138,10 @@ export default function App() {
                     <Route path="manage-tasks" element={<TasksManager />} />
                     <Route path="sessions/build" element={<SessionBuilder />} />
                     <Route path="sessions/play" element={<SessionPlayer />} />
+                    {/* D50 leftover: staff Play must land on a role-prefixed
+                        player, not /sessions/:id/player (that URL is unrouted
+                        and the catch-all sends the user to /login). */}
+                    <Route path="sessions/:sessionId/player" element={<SessionPlayer />} />
 
                     {/* ✅ District review route (same player in teacher mode) */}
                     <Route
@@ -162,6 +167,7 @@ export default function App() {
                     <Route path="tasks" element={<TasksManager />} />
                     <Route path="sessions/build" element={<SessionBuilder />} />
                     <Route path="sessions/play" element={<SessionPlayer />} />
+                    <Route path="sessions/:sessionId/player" element={<SessionPlayer />} />
 
                     {/* Secure teacher review route (mode='teacher') */}
                     <Route
@@ -195,6 +201,15 @@ export default function App() {
                 </ProtectedRoute>
               }
             />
+            {/* Legacy unprefixed Play URL. handlePlay used to send staff
+                here; the catch-all then rendered /login and looked like a
+                logout. Keep the bookmark working by forwarding to the
+                role-prefixed player without clearing auth. */}
+            <Route
+              path="/sessions/:sessionId/player"
+              element={<SessionPlayRedirect />}
+            />
+
             {/* Default → landing/login */}
             <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>

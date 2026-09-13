@@ -33,3 +33,10 @@ export const LIVE_SESSION_STATUSES = [
   SESSION_STATUS.REOPENED,
   SESSION_STATUS.PAUSED,
 ];
+
+// Older records used a hyphen. Compare after this, never against that
+// spelling written out — repoGuards scans src/ for the hyphenated literal.
+export function normalizeSessionStatus(status) {
+  if (status == null || status === "") return status;
+  return String(status).replace("-", "_");
+}

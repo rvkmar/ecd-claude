@@ -18,7 +18,7 @@ Restored D51–D57 notes (each marked “Restored 2026-09-13”):
 
 | | |
 |---|---|
-| Last completed unit | **D59** — role-split reports / attribute profile / examinee leak |
+| Last completed unit | **D59** — role-split reports / attribute profile / examinee leak. This branch also closes D50 leftover staff Play + student discovery (`claude/day60-staff-play-and-student-discovery.md`); that file is not the never-compress D60. |
 | Next queued | **D60** — never-compress adversarial review of selection/stopping (own session) |
 | Block | W12 — Activity Selection, stopping, reporting |
 | Block gate | Sessions end on an accuracy target, not only on length; attribute-profile report renders |
@@ -33,6 +33,7 @@ Restored D51–D57 notes (each marked “Restored 2026-09-13”):
 | 2026-09-13 | D58 | 2, alone | Premise rewritten: no new orchestrator. Persist `session.stopped`; player reads `data.stopped`. Live player walk later the same day: `s1789288381307` showed "Measurement target met" / attrA master 0.95. |
 | 2026-09-13 | D59 | 2, alone | Closed examinee leak on `teacher-report`. Role-split `SessionReport` / `reportsRoutes`. Classification + stop on report header, learner/teacher tabs, session list badge, session-player header. D60 not started. |
 | 2026-09-13 | docs | — | Restored missing D51–D57 handoffs under `claude/` (see file list in that PR). No product code. D55 remains the skipped WCAG audit. |
+| 2026-09-13 | D50 leftover | 2 | Staff Play no longer bounces to `/login`; Pause on the player; student My Sessions lists attendable sessions (`GET /api/sessions/mine`). Handoff: `day60-staff-play-and-student-discovery.md` (not the never-compress D60). |
 
 ## Compression debt
 
@@ -68,6 +69,6 @@ Debt against the never-compress list is not permitted. **D60** is next on that l
 - Session not bound to a specific Assembly Model (ambiguous match → none applied)
 - Adaptive selection: nearest difficulty, not max information (held for benchmark work)
 - Chunk >500 kB — D74
-- Student My Sessions placeholder
+- ~~Student My Sessions placeholder~~ closed D60
 - Dead-export guard can miss unused exports that share a name
 - Session ownership-scoping (a student may only read their own session) — still open; D59 closed the role leak only
