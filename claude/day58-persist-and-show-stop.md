@@ -49,6 +49,8 @@ D58 therefore did not add a second decision site. It closed the delivery loop on
 
 A parallel API trace on `s1789288355960` returned the same `{ stopped }` shape from `next-task` after the second submit.
 
+The one-off walk harnesses (`scripts-d56-playwright.cjs`, `scripts-d56-playwright-finish.cjs`, `scripts/seed-d56-walk.mjs`) stay on disk and are **gitignored** (`0efe535`). They hardcode a student password and machine-local temp paths; they are not product code.
+
 **Finding for D60:** the AM targeted `attrA` *and* `attrB`, but only `attrA` appeared in `stopped.targets` ("1 of 1"). Unmeasured attributes are not in `assemblyProgress`, so `targetsMet` can fire before every *declared* target has evidence. That may be correct ("reported" ≠ "declared") or premature stopping — the review should say which.
 
 ---
