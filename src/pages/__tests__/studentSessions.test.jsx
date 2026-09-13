@@ -114,4 +114,27 @@ describe("Student My Sessions (D50 leftover discovery)", () => {
     expect(screen.queryByText(/Could not load sessions/)).toBeNull();
     expect(fetchMock).toHaveBeenCalled();
   });
+
+  it("treats a leftover /mine 404 Session not found as an empty list, not an alert", async () => {
+    global.fetch = vi.fn(() =>
+      Promise.resolve({
+        ok: false,
+        status: 404,
+        json: () => Promise.resolve({ error: "Session not found" }),
+        text: () => Promise.resolve(JSON.stringify({ error: "Session not found" })),
+      })
+    );
+    render(
+      <MemoryRouter>
+        <StudentSessionList />
+      </MemoryRouter>
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByText(/No upcoming or in-progress sessions are available for you yet/)
+      ).toBeInTheDocument()
+    );
+    expect(screen.queryByText(/Could not load sessions/)).toBeNull();
+    expect(screen.queryByText(/Session not found/)).toBeNull();
+  });
 });

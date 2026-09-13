@@ -1,25 +1,25 @@
 // src/utils/sessionPlay.js
 //
-// Role-prefixed player URLs and "this session is for this student" matching.
+// Role-prefixed player URLs, staff Play/Pause/Operate rules, and
+// "this session is for this student" matching.
 //
-// Play used to do `window.location.href = /sessions/${id}/player`. That path
-// has never been registered: App.jsx's catch-all sends it to /login, which
-// is the staff Play "logout". Every role that can play must use
-// `/${role}/sessions/:sessionId/player`.
+// Staff Play used to navigate into SessionPlayer (finish UI). Play/Pause
+// are now list-level persist actions; Operate opens the player. Student
+// examinees still Play into the player.
 //
-// Student discovery has a second identity gap: sessions store `studentId`
-// from the students collection (`stu…`), while the logged-in user is a
-// `users` row (`stud1`). Until enrollment links those, matching is
-// username / user id / student name / optional student.username — and if
-// none of those hit, live sessions stay visible so a student can still
-// attend (the API already returns every session to any authenticated role).
-
+// Student discovery has an identity gap: sessions store `studentId` from
+// the students collection (`stu…`) or a typed username (`stud1`), while
+// the logged-in user is a `users` row. Matching covers username / user id
+// / student name / studentIds[] / optional student.username.
+//
 // Node ESM (server/index.js, Docker CMD) will not resolve a bare
-// "./sessionStatus" — Vite/Vitest will. PR #12 imported this file from
-// sessionRoutes for GET /mine; the extensionless specifier made native
-// Node fail to load the router, so /mine never registered and the
-// student list hit GET /:id ("Session not found").
-import { LIVE_SESSION_STATUSES, SESSION_STATUS, normalizeSessionStatus } from "./sessionStatus.js";
+// "./sessionStatus" — Vite/Vitest will. Always import with .js.
+import {
+  LIVE_SESSION_STATUSES,
+  SESSION_STATUS,
+  normalizeSessionStatus,
+  RESERVED_SESSION_COLLECTION_IDS,
+} from "./sessionStatus.js";
 
 export const PLAYABLE_ROLES = Object.freeze(["student", "teacher", "district"]);
 
@@ -28,7 +28,18 @@ export function sessionPlayerPath(role, sessionId) {
   return `/${role}/sessions/${sessionId}/player`;
 }
 
-export function studentIdentityKeys(user, students = []) {
+// Dashboard that hosts the sessions list (tab), not the player.
+export function sessionListPath(role) {
+  if (!role) return "/";
+  if (role === "admin") return "/admin";
+  return `/${role}`;
+}
+
+export function isReservedSessionCollectionId(id) {
+  return RESERVED_SESSION_COLLECTION_IDS.includes(String(id || ""));
+}
+
+export function studentIdentityKeys(user, students = [], users = []) {
   const keys = new Set();
   if (!user) return keys;
   if (user.username) keys.add(String(user.username));
@@ -44,25 +55,57 @@ export function studentIdentityKeys(user, students = []) {
       (user.id && (s.id === user.id || s.userId === user.id));
     if (linked && s.id) keys.add(String(s.id));
   }
+  for (const u of users || []) {
+    if (!u || u.role !== "student") continue;
+    const sameUser =
+      (user.username && u.username === user.username) ||
+      (user.id && (u.id === user.id || u.username === user.id));
+    if (!sameUser) continue;
+    if (u.username) keys.add(String(u.username));
+    if (u.id) keys.add(String(u.id));
+  }
   return keys;
 }
 
-export function sessionAssignedToStudent(session, user, students = []) {
-  if (!session?.studentId || !user) return false;
-  return studentIdentityKeys(user, students).has(String(session.studentId));
+export function sessionAssigneeIds(session) {
+  const ids = [];
+  if (session?.studentId) ids.push(String(session.studentId));
+  for (const id of session?.studentIds || []) {
+    if (id != null && id !== "") ids.push(String(id));
+  }
+  return [...new Set(ids)];
+}
+
+export function sessionAssignedToStudent(session, user, students = [], users = []) {
+  if (!user || !session) return false;
+  const assignees = sessionAssigneeIds(session);
+  if (assignees.length === 0) return false;
+  const keys = studentIdentityKeys(user, students, users);
+  return assignees.some((id) => keys.has(id));
 }
 
 function isInProgressStatus(status) {
   return normalizeSessionStatus(status) === SESSION_STATUS.IN_PROGRESS;
 }
 
-export function isAttendableStatus(status) {
-  return LIVE_SESSION_STATUSES.includes(status) || isInProgressStatus(status);
+function isReadyStatus(status) {
+  return normalizeSessionStatus(status) === SESSION_STATUS.READY;
 }
 
-export function attendableSessionsForStudent(sessions, user, students = []) {
+function isPausedStatus(status) {
+  return normalizeSessionStatus(status) === SESSION_STATUS.PAUSED;
+}
+
+export function isAttendableStatus(status) {
+  const normalized = normalizeSessionStatus(status);
+  return LIVE_SESSION_STATUSES.includes(status) ||
+    LIVE_SESSION_STATUSES.includes(normalized) ||
+    isInProgressStatus(status);
+}
+
+export function attendableSessionsForStudent(sessions, user, students = [], users = []) {
   const live = (sessions || []).filter((s) => isAttendableStatus(s?.status));
-  const assigned = live.filter((s) => sessionAssignedToStudent(s, user, students));
+  const assigned = live.filter((s) => sessionAssignedToStudent(s, user, students, users));
   // If we can resolve this user onto at least one session, only show those.
   // Otherwise show every live session so discovery is not empty solely
   // because users and students are still unlinked collections.
@@ -70,8 +113,94 @@ export function attendableSessionsForStudent(sessions, user, students = []) {
   return live;
 }
 
+function isClosedSession(session) {
+  if (!session) return true;
+  if (session.autoFinished || session.isCompleted) return true;
+  const status = normalizeSessionStatus(session.status);
+  return ["completed", "archived", "submitted", "reviewed"].includes(status);
+}
+
+// List Play — start or resume. Mutually exclusive with Pause.
+export function canPlaySession(session, { reviewMode = false } = {}) {
+  if (reviewMode || !session || isClosedSession(session)) return false;
+  return isReadyStatus(session.status) || isPausedStatus(session.status);
+}
+
 export function canPauseSession(session, { reviewMode = false } = {}) {
-  if (reviewMode || !session) return false;
-  if (session.autoFinished || session.isCompleted) return false;
+  if (reviewMode || !session || isClosedSession(session)) return false;
   return isInProgressStatus(session.status) || session.status === SESSION_STATUS.REOPENED;
+}
+
+// Operate opens the player/finish surface. Only once the session is live.
+export function canOperateSession(session, { reviewMode = false } = {}) {
+  if (reviewMode || !session || isClosedSession(session)) return false;
+  return isInProgressStatus(session.status) || session.status === SESSION_STATUS.REOPENED;
+}
+
+export function buildAssignableRoster(students = [], users = []) {
+  const byId = new Map();
+  for (const s of students || []) {
+    if (!s?.id) continue;
+    byId.set(String(s.id), {
+      id: String(s.id),
+      name: s.name || s.id,
+      username: s.username || null,
+      classId: s.classId || s.class || null,
+      source: "student",
+    });
+  }
+  for (const u of users || []) {
+    if (!u || (u.role && u.role !== "student")) continue;
+    const id = String(u.id || u.username || "");
+    if (!id) continue;
+    const username = u.username ? String(u.username) : null;
+    const existing = [...byId.values()].find(
+      (row) =>
+        row.id === id ||
+        (username && (row.username === username || row.name === username || row.id === username))
+    );
+    if (existing) {
+      if (username && !existing.username) existing.username = username;
+      continue;
+    }
+    byId.set(id, {
+      id,
+      name: u.profile?.name || username || id,
+      username,
+      classId: u.profile?.classId || u.profile?.grade || null,
+      source: "user",
+    });
+  }
+  const list = [...byId.values()];
+  const cohortMap = new Map();
+  for (const row of list) {
+    if (!row.classId) continue;
+    const key = String(row.classId);
+    if (!cohortMap.has(key)) {
+      cohortMap.set(key, { id: key, name: `Class ${key}`, studentIds: [] });
+    }
+    cohortMap.get(key).studentIds.push(row.id);
+  }
+  return { students: list, cohorts: [...cohortMap.values()] };
+}
+
+export function resolveSessionAssignees(
+  { studentId, studentIds, cohortId } = {},
+  roster = { students: [], cohorts: [] }
+) {
+  const ids = new Set();
+  if (studentId != null && String(studentId).trim()) {
+    ids.add(String(studentId).trim());
+  }
+  for (const id of studentIds || []) {
+    if (id != null && String(id).trim()) ids.add(String(id).trim());
+  }
+  if (cohortId) {
+    const fromCohort = (roster.cohorts || []).find((c) => String(c.id) === String(cohortId));
+    for (const id of fromCohort?.studentIds || []) ids.add(String(id));
+    for (const s of roster.students || []) {
+      if (String(s.classId) === String(cohortId)) ids.add(String(s.id));
+    }
+  }
+  return [...ids];
 }

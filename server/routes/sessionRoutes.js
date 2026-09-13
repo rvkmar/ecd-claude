@@ -3,7 +3,12 @@ import { authenticateToken, authorizeRole } from "../utils/authMiddleware.js";
 import { loadDB, saveDB, finishSession } from "../../src/utils/db-server.js";
 import { validateEntity } from "../../src/utils/schema.js";
 import { SESSION_STATUS } from "../../src/utils/sessionStatus.js";
-import { attendableSessionsForStudent } from "../../src/utils/sessionPlay.js";
+import {
+  attendableSessionsForStudent,
+  buildAssignableRoster,
+  isReservedSessionCollectionId,
+  resolveSessionAssignees,
+} from "../../src/utils/sessionPlay.js";
 import { identifyEvidence } from "../delivery/evidenceIdentification.js";
 import {
   accumulateEvidence,
@@ -62,9 +67,11 @@ const R_BACKEND = process.env.R_BACKEND_URL || "http://localhost:4000";
 // ------------------------------
 // POST /api/sessions
 // ------------------------------
-// body: { taskIds, studentId, selectionStrategy?, nextTaskPolicy? }
+// body: { taskIds, studentId?, studentIds?, cohortId?, selectionStrategy?, nextTaskPolicy? }
+// One session per assignee so each examinee has their own responses.
+// Status starts as `ready` — staff Play persists `in_progress`.
 router.post("/", (req, res) => {
-  const { taskIds, studentId, selectionStrategy, nextTaskPolicy } = req.body;
+  const { taskIds, studentId, studentIds, cohortId, selectionStrategy, nextTaskPolicy } = req.body;
   const db = loadDB();
 
   if (!Array.isArray(taskIds) || taskIds.length === 0) {
@@ -78,6 +85,16 @@ router.post("/", (req, res) => {
     }
   }
 
+  const roster = buildAssignableRoster(db.students || [], db.users || []);
+  const assignees = resolveSessionAssignees(
+    { studentId, studentIds, cohortId },
+    roster
+  );
+  if (assignees.length === 0) {
+    return res.status(400).json({
+      error: "Select a student, enter a student ID, or choose a cohort",
+    });
+  }
 
   // ✅ Policy validation
   let strategy = selectionStrategy || "fixed";
@@ -106,36 +123,52 @@ router.post("/", (req, res) => {
     policyConfig = { policyId: foundPolicy.id, ...policyConfig };
   }
 
-  const newSession = {
-    id: `s${Date.now()}`,
-    studentId: studentId || null,
-    taskIds,
-    currentTaskIndex: 0,
-    responses: [],
+  const now = new Date().toISOString();
+  const base = Date.now();
+  const assignmentGroupId = assignees.length > 1 ? `ag${base}` : null;
+  const created = [];
 
-    // Adaptive state
-    studentModel: {},
-    selectionStrategy: strategy,
-    nextTaskPolicy: policyConfig,
+  for (let i = 0; i < assignees.length; i++) {
+    const assignee = assignees[i];
+    const newSession = {
+      id: `s${base}${i === 0 ? "" : `-${i}`}`,
+      studentId: assignee,
+      studentIds: [assignee],
+      assignmentGroupId,
+      cohortId: cohortId || null,
+      taskIds,
+      currentTaskIndex: 0,
+      responses: [],
 
-    // Lifecycle
-    status: SESSION_STATUS.IN_PROGRESS,
-    isCompleted: false,
-    startedAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
+      // Adaptive state
+      studentModel: {},
+      selectionStrategy: strategy,
+      nextTaskPolicy: policyConfig,
 
-  // ✅ Schema validation
-  const { valid, errors } = validateEntity("sessions", newSession, db);
-  if (!valid) {
-    return res.status(400).json({ error: "Schema validation failed", details: errors });
+      // Lifecycle — ready until staff Play. Creating as in_progress made
+      // the list show Play and Pause together and sent Play into the
+      // finish/player surface.
+      status: SESSION_STATUS.READY,
+      isCompleted: false,
+      startedAt: now,
+      updatedAt: now,
+    };
+
+    const { valid, errors } = validateEntity("sessions", newSession, db);
+    if (!valid) {
+      return res.status(400).json({ error: "Schema validation failed", details: errors });
+    }
+    created.push(newSession);
   }
 
   if (!db.sessions) db.sessions = [];
-  db.sessions.push(newSession);
+  db.sessions.push(...created);
   saveDB(db);
 
-  res.status(201).json(newSession);
+  if (created.length === 1) {
+    return res.status(201).json(created[0]);
+  }
+  res.status(201).json({ assignmentGroupId, sessions: created });
 });
 
 
@@ -174,23 +207,36 @@ router.get("/archived", (req, res) => {
 // no filtered list. Must be registered before /:id so "mine" is not
 // treated as a session id.
 router.get("/mine", (req, res) => {
-  const db = loadDB();
-  const sessions = db.sessions || [];
-  const students = db.students || [];
-  const user = req.user || {};
-  if (user.role === "student") {
-    return res.json(attendableSessionsForStudent(sessions, user, students));
+  try {
+    const db = loadDB();
+    const sessions = db.sessions || [];
+    const students = db.students || [];
+    const users = db.users || [];
+    const user = req.user || {};
+    if (user.role === "student") {
+      return res.json(attendableSessionsForStudent(sessions, user, students, users));
+    }
+    const live = sessions.filter((s) => s.status !== "archived");
+    return res.json(live);
+  } catch (err) {
+    // A thrown /mine must not become GET /:id's 404. Empty list is honest.
+    console.error("GET /api/sessions/mine failed:", err);
+    return res.json([]);
   }
-  const live = sessions.filter((s) => s.status !== "archived");
-  res.json(live);
 });
 
 // ------------------------------
 // GET /api/sessions/:id
 // ------------------------------
 router.get("/:id", (req, res) => {
+  // Belt-and-suspenders: if /mine (or /active, /archived) is not registered
+  // — native ESM miss, stale process — do not treat the collection name as
+  // a session id. "Session not found" is what My Sessions displayed.
+  if (isReservedSessionCollectionId(req.params.id)) {
+    return res.json([]);
+  }
   const db = loadDB();
-  const session = db.sessions.find(s => s.id === req.params.id);
+  const session = (db.sessions || []).find(s => s.id === req.params.id);
   if (!session) return res.status(404).json({ error: "Session not found" });
   res.json(session);
 });
@@ -667,6 +713,30 @@ router.get("/:id/next-task", (req, res) => {
     return res.json({ ...decision, stopped: session.stopped });
   }
   return res.json(decision);
+});
+
+// ------------------------------
+// POST /api/sessions/:id/play
+// ------------------------------
+// List-level start/resume. Does not finish the session. Ready or paused
+// become in_progress; already in_progress is a no-op persist.
+router.post("/:id/play", (req, res) => {
+  const { id } = req.params;
+  const db = loadDB();
+  if (!db.sessions) db.sessions = [];
+  const idx = db.sessions.findIndex((s) => s.id === id);
+  if (idx === -1) return res.status(404).json({ error: "Session not found" });
+
+  const session = db.sessions[idx];
+  if (session.isCompleted || ["completed", "archived", "submitted", "reviewed"].includes(session.status)) {
+    return res.status(400).json({ error: "Session cannot be played" });
+  }
+
+  session.status = SESSION_STATUS.IN_PROGRESS;
+  session.updatedAt = new Date().toISOString();
+  if (!session.startedAt) session.startedAt = session.updatedAt;
+  saveDB(db);
+  res.json(session);
 });
 
 // ------------------------------

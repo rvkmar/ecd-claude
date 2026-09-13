@@ -20,6 +20,7 @@ export default function SessionBuilder({ notify }) {
   const navigate = useNavigate();
   const [sessions, setSessions] = useState([]);
   const [students, setStudents] = useState([]);
+  const [cohorts, setCohorts] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [selectedSession, setSelectedSession] = useState(null);
   const [reportSessionId, setReportSessionId] = useState(null);
@@ -37,10 +38,12 @@ export default function SessionBuilder({ notify }) {
   //   else toast(msg);
   // };
 
-  // Load sessions + supporting collections
+  // Load sessions + supporting collections. sessionTab is a dependency so
+  // Active / Archived actually refetch (the previous [] mount-only effect
+  // left the list stale after a tab change).
   useEffect(() => {
     loadAll();
-  }, []);
+  }, [sessionTab]);
 
   // const loadAll = async () => {
   //   setLoading(true);
@@ -88,14 +91,21 @@ export default function SessionBuilder({ notify }) {
       apiFetch("/api/sessions/active", {}, auth),    // for counts
       apiFetch("/api/sessions/archived", {}, auth),  // for counts
       apiFetch(sessionsUrl, {}, auth),               // actual list
-      apiFetch("/api/students", {}, auth),
-      apiFetch("/api/tasks", {}, auth),
+      apiFetch("/api/students", {}, auth).catch(() => []),
+      apiFetch("/api/tasks", {}, auth).catch(() => []),
+      apiFetch("/api/students/assignable", {}, auth).catch(() => null),
     ])
-      .then(([activeData, archivedData, currentData, stuData, taskData]) => {
+      .then(([activeData, archivedData, currentData, stuData, taskData, assignable]) => {
         setActiveCount((activeData || []).length);
         setArchivedCount((archivedData || []).length);
         setSessions(currentData || []);   // ✅ show active or archived depending on tab
-        setStudents(stuData || []);
+        if (assignable && Array.isArray(assignable.students) && assignable.students.length) {
+          setStudents(assignable.students);
+          setCohorts(assignable.cohorts || []);
+        } else {
+          setStudents(stuData || []);
+          setCohorts([]);
+        }
         setTasks(taskData || []);
       })
       .catch((err) => {
@@ -118,8 +128,17 @@ export default function SessionBuilder({ notify }) {
         },
         auth
       );
-      setSessions((prev) => [...prev, created]);
-      notify?.("Session created.");
+      const createdSessions = Array.isArray(created?.sessions)
+        ? created.sessions
+        : created
+          ? [created]
+          : [];
+      setSessions((prev) => [...prev, ...createdSessions]);
+      notify?.(
+        createdSessions.length > 1
+          ? `${createdSessions.length} sessions created for the cohort.`
+          : "Session created."
+      );
       setSelectedSession(null);
     } catch (e) {
       console.error(e);
@@ -200,11 +219,25 @@ export default function SessionBuilder({ notify }) {
     }
   };
 
-  const handlePlay = (session) => {
-    // Must stay inside the role prefix. The unprefixed /sessions/:id/player
-    // URL is not a protected route — App.jsx's catch-all used to bounce it
-    // to /login (the staff Play "logout"). navigate() also avoids a full
-    // reload that would remount AuthProvider.
+  const handlePlay = async (session) => {
+    // Persist start/resume on the list. Do not navigate into the player —
+    // that trapped staff in the finish flow so they could not run multiple
+    // sessions. Operate is the path into the player.
+    try {
+      const updated = await apiFetch(
+        `/api/sessions/${session.id}/play`,
+        { method: "POST" },
+        auth
+      );
+      setSessions((prev) => prev.map((s) => (s.id === session.id ? updated : s)));
+      notify?.("Session is in progress.");
+    } catch (e) {
+      console.error(e);
+      notify?.("❌ Failed to play session");
+    }
+  };
+
+  const handleOperate = (session) => {
     const path = sessionPlayerPath(auth?.role, session.id);
     if (!path) {
       notify?.("Cannot open this session for your role.");
@@ -231,10 +264,11 @@ export default function SessionBuilder({ notify }) {
             onClick={() =>
               setSelectedSession({
                 taskIds: [],
-                studentId: students[0]?.id || "",
+                studentId: "",
+                studentIds: [],
                 selectionStrategy: "fixed",
                 nextTaskPolicy: {},
-                status: SESSION_STATUS.IN_PROGRESS,
+                status: SESSION_STATUS.READY,
               })
             }
           >
@@ -259,7 +293,8 @@ export default function SessionBuilder({ notify }) {
         students={students}
         onPlay={handlePlay}
         onPause={handlePause}
-        onResume={handleResume}
+        onOperate={handleOperate}
+        onResume={handlePlay}
         // onDelete={confirmDeleteSession}
         onArchive={handleArchive}   // ✅ instead of onDelete
         onViewReport={handleViewReport}
@@ -273,6 +308,7 @@ export default function SessionBuilder({ notify }) {
             <SessionForm
               model={selectedSession}
               students={students}
+              cohorts={cohorts}
               tasks={tasks}
               onSave={handleSave}
               onCancel={() => setSelectedSession(null)}

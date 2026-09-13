@@ -101,7 +101,7 @@ describe("every write route declares a role gate", () => {
   const OPEN_BY_DESIGN = new Set([
     // Login is how you get a token in the first place.
     "usersRoutes.js:POST:/login",
-    // A session's own lifecycle (create, submit, pause, resume, finish,
+    // A session's own lifecycle (create, submit, play, pause, resume, finish,
     // review, archive) is the student's self-service flow, not a
     // privileged action -- gating it by role would block the exact
     // people it exists for. Ownership-scoping this (a student may only
@@ -109,6 +109,7 @@ describe("every write route declares a role gate", () => {
     // a role-list one; see sessionRoutes.js's header comment.
     "sessionRoutes.js:POST:/",
     "sessionRoutes.js:POST:/:id/submit",
+    "sessionRoutes.js:POST:/:id/play",
     "sessionRoutes.js:POST:/:id/pause",
     "sessionRoutes.js:POST:/:id/resume",
     "sessionRoutes.js:POST:/:id/finish",

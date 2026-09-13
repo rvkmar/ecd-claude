@@ -1,11 +1,16 @@
 import { describe, it, expect } from "vitest";
 import {
   sessionPlayerPath,
+  sessionListPath,
   studentIdentityKeys,
   sessionAssignedToStudent,
   attendableSessionsForStudent,
   canPauseSession,
+  canPlaySession,
+  canOperateSession,
   isAttendableStatus,
+  buildAssignableRoster,
+  resolveSessionAssignees,
 } from "../sessionPlay.js";
 
 describe("sessionPlayerPath", () => {
@@ -65,5 +70,80 @@ describe("student session matching", () => {
     expect(canPauseSession({ status: "in_progress" })).toBe(true);
     expect(canPauseSession({ status: "in_progress" }, { reviewMode: true })).toBe(false);
     expect(canPauseSession({ status: "paused" })).toBe(false);
+  });
+
+  it("matches studentIds[] so a typed username is discoverable via /mine", () => {
+    expect(
+      sessionAssignedToStudent(
+        { studentId: "stu99", studentIds: ["stu99", "stud1"] },
+        user,
+        []
+      )
+    ).toBe(true);
+  });
+});
+
+describe("staff Play / Pause / Operate exclusivity", () => {
+  it("shows Play xor Pause, never both", () => {
+    const ready = { status: "ready" };
+    const live = { status: "in_progress" };
+    const paused = { status: "paused" };
+    expect(canPlaySession(ready)).toBe(true);
+    expect(canPauseSession(ready)).toBe(false);
+    expect(canOperateSession(ready)).toBe(false);
+
+    expect(canPlaySession(live)).toBe(false);
+    expect(canPauseSession(live)).toBe(true);
+    expect(canOperateSession(live)).toBe(true);
+
+    expect(canPlaySession(paused)).toBe(true);
+    expect(canPauseSession(paused)).toBe(false);
+    expect(canOperateSession(paused)).toBe(false);
+  });
+
+  it("never offers Play and Pause on the same session", () => {
+    for (const status of ["ready", "in_progress", "paused", "reopened", "completed"]) {
+      const session = { status };
+      expect(canPlaySession(session) && canPauseSession(session)).toBe(false);
+    }
+  });
+});
+
+describe("sessionListPath", () => {
+  it("returns the role dashboard, not the player", () => {
+    expect(sessionListPath("teacher")).toBe("/teacher");
+    expect(sessionListPath("district")).toBe("/district");
+    expect(sessionListPath("student")).toBe("/student");
+  });
+});
+
+describe("assignable roster and cohort resolution", () => {
+  it("merges students collection rows with student-role users (stud1)", () => {
+    const roster = buildAssignableRoster(
+      [{ id: "stu1", name: "Pat", classId: "6A" }],
+      [
+        { username: "stud1", role: "student", profile: { grade: "6A" } },
+        { username: "teach1", role: "teacher" },
+      ]
+    );
+    expect(roster.students.map((s) => s.id).sort()).toEqual(["stu1", "stud1"]);
+    expect(roster.cohorts).toEqual([
+      { id: "6A", name: "Class 6A", studentIds: ["stu1", "stud1"] },
+    ]);
+  });
+
+  it("resolves a typed student ID even when the roster is empty", () => {
+    expect(resolveSessionAssignees({ studentId: "stud1" }, { students: [], cohorts: [] })).toEqual([
+      "stud1",
+    ]);
+    expect(
+      resolveSessionAssignees(
+        { studentIds: ["stud1", "stu2"], cohortId: "6A" },
+        {
+          students: [{ id: "stu3", classId: "6A" }],
+          cohorts: [{ id: "6A", studentIds: ["stu3"] }],
+        }
+      )
+    ).toEqual(["stud1", "stu2", "stu3"]);
   });
 });

@@ -22,13 +22,29 @@ export default function StudentSessionList() {
     apiFetch("/api/sessions/mine", {}, auth)
       .then((data) => {
         if (cancelled) return;
-        setSessions(Array.isArray(data) ? data : []);
+        // /mine must be an array. A reserved-id fallback or a mistaken
+        // GET /:id object is not a list — treat as empty, never as a
+        // "Session not found" alert.
+        if (Array.isArray(data)) {
+          setSessions(data);
+          setError(null);
+          return;
+        }
+        setSessions([]);
         setError(null);
       })
       .catch((err) => {
         if (cancelled) return;
         console.error(err);
-        setError(apiErrorMessage(err, err.message || "Failed to load sessions"));
+        const msg = apiErrorMessage(err, err.message || "Failed to load sessions");
+        // GET /:id ("mine") used to 404 with this exact string. Empty
+        // list + empty-state is the honest product; that error is not.
+        if (err.status === 404 || /session not found/i.test(String(msg))) {
+          setSessions([]);
+          setError(null);
+          return;
+        }
+        setError(msg);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -70,6 +86,7 @@ export default function StudentSessionList() {
       {sessions.map((s) => {
         const playable = canPauseSession(s);
         const paused = s.status === SESSION_STATUS.PAUSED;
+        const upcoming = s.status === SESSION_STATUS.READY;
         return (
           <div
             key={s.id}
@@ -87,6 +104,9 @@ export default function StudentSessionList() {
               </div>
             </div>
             <div className="flex flex-col space-y-2 items-end">
+              {upcoming && (
+                <span className="text-xs text-gray-600">Not open yet</span>
+              )}
               {playable && (
                 <button
                   type="button"
