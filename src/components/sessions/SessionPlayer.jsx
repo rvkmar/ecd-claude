@@ -3,6 +3,8 @@ import React, { useEffect, useState, useRef } from "react";
 import Modal from "../ui/Modal";
 import toast from "react-hot-toast";
 import { usePolicies } from "../../api/queries/policies";
+import { useAuth } from "../../auth/AuthProvider";
+import { apiFetch, apiErrorMessage } from "../../api/apiClient";
 import { SESSION_STATUS } from "../../utils/sessionStatus";
 
 import { useNavigate, useParams } from "react-router-dom";
@@ -74,6 +76,7 @@ export default function SessionPlayer({
   // Policy name resolution now goes through the shared usePolicies() cache
   // (see src/api/queries/policies.js) instead of its own fetch — Phase 2
   // data-layer migration.
+  const { auth } = useAuth() || {};
   const { data: policies = [] } = usePolicies();
 
   const [finalizeModalOpen, setFinalizeModalOpen] = useState(false);
@@ -137,14 +140,7 @@ export default function SessionPlayer({
 
   // ----- helper: fetch JSON safely -----
   async function fetchJsonSafe(url) {
-    try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return await res.json();
-    } catch (err) {
-      // bubble up; callers may handle
-      throw err;
-    }
+    return apiFetch(url, {}, auth);
   }
 
   // ----- helper: fetch and attach taskModel to a task object -----
@@ -198,14 +194,14 @@ export default function SessionPlayer({
         // fetch session and evidenceModels in parallel
         const [sess, ems] = await Promise.all([
           fetchJsonSafe(`/api/sessions/${sessionId}`),
-          fetch("/api/evidenceModels").then((r) => r.ok ? r.json() : []),
+          // Same fallback as the raw fetch: a failed list becomes [].
+          apiFetch("/api/evidenceModels", {}, auth).catch(() => []),
         ]);
 
         // 🔹 Fetch all referenced questions for teacher view
         let questionBank = [];
         try {
-          const qRes = await fetch("/api/questions");
-          questionBank = (await qRes.json()) || [];
+          questionBank = (await apiFetch("/api/questions", {}, auth)) || [];
         } catch (e) {
           console.warn("Failed to fetch item bank for review grouping", e);
         }
@@ -314,8 +310,11 @@ export default function SessionPlayer({
     setNoMoreTasks(false);
 
     try {
-      const res = await fetch(`/api/sessions/${sessionIdRef.current}/next-task`);
-      const data = await res.json();
+      const data = await apiFetch(
+        `/api/sessions/${sessionIdRef.current}/next-task`,
+        {},
+        auth
+      );
 
       if (!data || !data.taskId) {
         // no tasks left
@@ -502,16 +501,14 @@ export default function SessionPlayer({
       };
 
       try {
-        const res = await fetch(`/api/sessions/${sessionIdRef.current}/submit`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(itemPayload),
-        });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.error || `Submit failed (status ${res.status})`);
-        }
-        const updatedSession = await res.json();
+        const updatedSession = await apiFetch(
+          `/api/sessions/${sessionIdRef.current}/submit`,
+          {
+            method: "POST",
+            body: JSON.stringify(itemPayload),
+          },
+          auth
+        );
         setSession(updatedSession);
         setItemResponse(null);
         setDeliveredItem(null);
@@ -520,7 +517,7 @@ export default function SessionPlayer({
         // Match the legacy branch's failure reporting, but through the
         // toast system D43 made accessible rather than a blocking alert().
         console.error("Item submit failed", err);
-        notify(err.message || "Submission failed", "error");
+        notify(apiErrorMessage(err, err.message || "Submission failed"), "error");
       } finally {
         setSubmitting(false);
       }
@@ -558,18 +555,14 @@ export default function SessionPlayer({
     }
 
     try {
-      const res = await fetch(`/api/sessions/${sessionIdRef.current}/submit`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `Submit failed (status ${res.status})`);
-      }
-
-      const updatedSession = await res.json();
+      const updatedSession = await apiFetch(
+        `/api/sessions/${sessionIdRef.current}/submit`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+        auth
+      );
       setSession(updatedSession);
 
       // enrich tasks for updated session
@@ -597,7 +590,7 @@ export default function SessionPlayer({
       await loadNextTask();
     } catch (err) {
       console.error(err);
-      alert("Submission failed: " + err.message);
+      alert("Submission failed: " + apiErrorMessage(err, err.message));
     } finally {
       setSubmitting(false);
     }
@@ -613,19 +606,17 @@ export default function SessionPlayer({
   async function performFinalizeReview() {
     if (!sessionIdRef.current) return setFinalizeModalOpen(false);
     try {
-      const res = await fetch(`/api/sessions/${sessionIdRef.current}/finalize`, {
-        method: "POST",
-      });
-      if (!res.ok) {
-        const e = await res.json().catch(() => ({}));
-        throw new Error(e.error || "Finalize failed");
-      }
+      await apiFetch(
+        `/api/sessions/${sessionIdRef.current}/finalize`,
+        { method: "POST" },
+        auth
+      );
       notify?.("✅ Session finalized");
       // optionally refresh session state
       await loadNextTask(); // or reload session list as appropriate
     } catch (err) {
       console.error(err);
-      notify?.("❌ Failed to finalize review: " + err.message);
+      notify?.("❌ Failed to finalize review: " + apiErrorMessage(err, err.message));
     } finally {
       setFinalizeModalOpen(false);
     }
@@ -651,17 +642,17 @@ export default function SessionPlayer({
   async function confirmFinish() {
     setFinishing(true);
     try {
-      const res = await fetch(`/api/sessions/${sessionIdRef.current}/finish`, {
-        method: "POST",
-      });
-      if (!res.ok) throw new Error("Failed to finish session");
-      const updated = await res.json();
+      const updated = await apiFetch(
+        `/api/sessions/${sessionIdRef.current}/finish`,
+        { method: "POST" },
+        auth
+      );
       setSession(updated);
       setNoMoreTasks(true);
       if (onFinished) onFinished(updated);
     } catch (e) {
       console.error(e);
-      alert("Failed to finish session: " + e.message);
+      alert("Failed to finish session: " + apiErrorMessage(e, e.message));
       setFinishing(false);
     }
   }

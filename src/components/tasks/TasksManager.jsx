@@ -3,6 +3,8 @@ import toast from "react-hot-toast";
 import Modal from "../ui/Modal";
 import { useTaskModels } from "@/api/queries/taskModels";
 import { useQuestions } from "@/api/queries/questions";
+import { useAuth } from "@/auth/AuthProvider";
+import { apiFetch, apiErrorMessage } from "@/api/apiClient";
 
 // TasksManager.jsx
 // Minimal UI for managing tasks (create instances of task models with optional linked questions)
@@ -11,9 +13,10 @@ export default function TasksManager({ notify }) {
   const [tasks, setTasks] = useState([]);
   const [loadingOther, setLoadingOther] = useState(true);
 
-  // Phase 2: taskModels and questions now come from the shared query hooks;
-  // tasks stays raw fetch here (the tasks domain migrates in a later batch,
-  // see task #19).
+  // Phase 2: taskModels and questions come from the shared query hooks;
+  // tasks has no query module yet, so the three writes below go through
+  // apiFetch directly.
+  const { auth } = useAuth() || {};
   const { data: taskModels = [], isLoading: taskModelsLoading } = useTaskModels();
   const { data: questions = [], isLoading: questionsLoading } = useQuestions();
   const loading = loadingOther || taskModelsLoading || questionsLoading;
@@ -31,8 +34,7 @@ export default function TasksManager({ notify }) {
 
   // Load tasks
   useEffect(() => {
-    fetch("/api/tasks")
-      .then((r) => r.json())
+    apiFetch("/api/tasks", {}, auth)
       .then((t) => setTasks(t || []))
       .catch(() => notify?.("❌ Failed to load activities"))
       .finally(() => setLoadingOther(false));
@@ -58,15 +60,16 @@ export default function TasksManager({ notify }) {
     e.preventDefault();
     if (!selectedModelId) return notify?.("Select an activity template");
     try {
-      const res = await fetch("/api/tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const created = await apiFetch(
+        "/api/tasks",
+        {
+          method: "POST",
           body: JSON.stringify({
             taskModelId: selectedModelId,
           }),
-      });
-      if (!res.ok) throw new Error("Failed to create activity");
-      const created = await res.json();
+        },
+        auth
+      );
       setTasks([...tasks, created]);
       setSelectedModelId("");
       notify?.("Activity created");
@@ -97,12 +100,11 @@ export default function TasksManager({ notify }) {
     const { taskId } = deleteModal;
     if (!taskId) return setDeleteModal({ open: false, taskId: null });
     try {
-      const res = await fetch(`/api/tasks/${taskId}`, { method: "DELETE" });
-      if (!res.ok) throw new Error("Failed to delete activity");
+      await apiFetch(`/api/tasks/${taskId}`, { method: "DELETE" }, auth);
       setTasks((prev) => prev.filter((t) => t.id !== taskId));
       notify?.("✅ Activity deleted successfully");
     } catch (err) {
-      notify?.("❌ Failed to delete activity: " + err.message);
+      notify?.("❌ Failed to delete activity: " + apiErrorMessage(err, err.message));
     } finally {
       setDeleteModal({ open: false, taskId: null });
     }

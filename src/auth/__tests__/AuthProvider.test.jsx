@@ -66,7 +66,8 @@ describe("AuthProvider", () => {
     const token = fakeJwt({ username: "teach1", role: "teacher", exp });
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ token, username: "teach1", role: "teacher" }),
+      status: 200,
+      text: async () => JSON.stringify({ token, username: "teach1", role: "teacher" }),
     });
 
     renderWithProvider();
@@ -86,7 +87,7 @@ describe("AuthProvider", () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 401,
-      json: async () => ({ error: "Invalid username or password" }),
+      text: async () => JSON.stringify({ error: "Invalid username or password" }),
     });
 
     let caughtError = null;
@@ -128,7 +129,8 @@ describe("AuthProvider", () => {
     });
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ token: expiredToken, username: "teach1", role: "teacher" }),
+      status: 200,
+      text: async () => JSON.stringify({ token: expiredToken, username: "teach1", role: "teacher" }),
     });
 
     let caughtError = null;
@@ -167,7 +169,8 @@ describe("AuthProvider", () => {
     const token = fakeJwt({ username: "teach1", role: "teacher", exp });
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ token, username: "teach1", role: "teacher" }),
+      status: 200,
+      text: async () => JSON.stringify({ token, username: "teach1", role: "teacher" }),
     });
 
     renderWithProvider();

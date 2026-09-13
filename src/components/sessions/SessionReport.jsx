@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { usePolicies } from "../../api/queries/policies";
+import { useAuth } from "../../auth/AuthProvider";
+import { apiFetch } from "../../api/apiClient";
 
 // SessionReport.jsx
 // Props:
@@ -22,6 +24,7 @@ export default function SessionReport({ sessionId, onClose }) {
   // Policy name resolution now goes through the shared usePolicies() cache
   // (see src/api/queries/policies.js) instead of its own fetch — Phase 2
   // data-layer migration.
+  const { auth } = useAuth() || {};
   const { data: policies = [] } = usePolicies();
 
   const getPolicyName = (policyId) => {
@@ -34,9 +37,9 @@ export default function SessionReport({ sessionId, onClose }) {
     if (!sessionId) return;
     setLoading(true);
     Promise.all([
-      fetch(`/api/reports/session/${sessionId}`).then((r) => r.json()),
-      fetch(`/api/reports/session/${sessionId}/learner-feedback`).then((r) => r.json()),
-      fetch(`/api/reports/session/${sessionId}/teacher-report`).then((r) => r.json()),
+      apiFetch(`/api/reports/session/${sessionId}`, {}, auth),
+      apiFetch(`/api/reports/session/${sessionId}/learner-feedback`, {}, auth),
+      apiFetch(`/api/reports/session/${sessionId}/teacher-report`, {}, auth),
     ])
       .then(([rep, learner, teacher]) => {
         setReport(rep);

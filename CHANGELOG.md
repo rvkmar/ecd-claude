@@ -100,6 +100,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Phase-2 `apiFetch` consolidation (D46): every remaining `/api` call in live
+  `src/` code now goes through `apiFetch` or an existing React Query hook that
+  uses it. Login is included -- `AuthProvider` calls `apiFetch` without a token,
+  which is the client's documented pre-auth path. A repo guard in
+  `src/test/repoGuards.test.js` fails if a raw `fetch("/api...")` is reintroduced.
+
 - A classification-accuracy target is now evaluated only against an actual
   attribute-mastery posterior. A binary Student Model Variable carrying a
   classical (CTT / sum / threshold) model reports a weighted proportion of
@@ -126,7 +132,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- N/A
+- `src/api/authFetchInterceptor.js` and its `main.jsx` install. The Phase-1
+  `window.fetch` bridge is gone now that every `/api` call site attaches
+  Authorization through `apiFetch`.
 
 ### Fixed
 

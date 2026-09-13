@@ -6,12 +6,15 @@ import NavBar from "../ui/NavBar";
 import { SESSION_STATUS } from "@/utils/sessionStatus";
 import Modal from "../ui/Modal";
 import toast from "react-hot-toast";
+import { useAuth } from "@/auth/AuthProvider";
+import { apiFetch, apiErrorMessage } from "@/api/apiClient";
 
 
 // SessionBuilder.jsx
 // Top-level manager for Sessions
 
 export default function SessionBuilder({ notify }) {
+  const { auth } = useAuth() || {};
   const [sessions, setSessions] = useState([]);
   const [students, setStudents] = useState([]);
   const [tasks, setTasks] = useState([]);
@@ -79,11 +82,11 @@ export default function SessionBuilder({ notify }) {
     const sessionsUrl =
       sessionTab === "archived" ? "/api/sessions/archived" : "/api/sessions/active";
     Promise.all([
-      fetch("/api/sessions/active").then((r) => r.json()),    // for counts
-      fetch("/api/sessions/archived").then((r) => r.json()),  // for counts
-      fetch(sessionsUrl).then((r) => r.json()),               // actual list
-      fetch("/api/students").then((r) => r.json()),
-      fetch("/api/tasks").then((r) => r.json()),
+      apiFetch("/api/sessions/active", {}, auth),    // for counts
+      apiFetch("/api/sessions/archived", {}, auth),  // for counts
+      apiFetch(sessionsUrl, {}, auth),               // actual list
+      apiFetch("/api/students", {}, auth),
+      apiFetch("/api/tasks", {}, auth),
     ])
       .then(([activeData, archivedData, currentData, stuData, taskData]) => {
         setActiveCount((activeData || []).length);
@@ -104,22 +107,20 @@ export default function SessionBuilder({ notify }) {
   const handleSave = async (sessionPayload) => {
     setBusy(true);
     try {
-      const res = await fetch(`/api/sessions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(sessionPayload),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "Failed to create session");
-      }
-      const created = await res.json();
+      const created = await apiFetch(
+        `/api/sessions`,
+        {
+          method: "POST",
+          body: JSON.stringify(sessionPayload),
+        },
+        auth
+      );
       setSessions((prev) => [...prev, created]);
       notify?.("Session created.");
       setSelectedSession(null);
     } catch (e) {
       console.error(e);
-      notify?.(`❌ ${e.message}`);
+      notify?.(`❌ ${apiErrorMessage(e, e.message || "Failed to create session")}`);
     } finally {
       setBusy(false);
     }
@@ -152,12 +153,11 @@ export default function SessionBuilder({ notify }) {
     const { sessionId } = deleteModal;
     if (!sessionId) return setDeleteModal({ open: false, sessionId: null });
     try {
-      const res = await fetch(`/api/sessions/${sessionId}`, { method: "DELETE" });
-      if (!res.ok) throw new Error("Failed to delete session");
+      await apiFetch(`/api/sessions/${sessionId}`, { method: "DELETE" }, auth);
       setSessions((prev) => prev.filter((s) => s.id !== sessionId));
       notify?.("✅ Session deleted successfully");
     } catch (err) {
-      notify?.("❌ Failed to delete session: " + err.message);
+      notify?.("❌ Failed to delete session: " + apiErrorMessage(err, err.message));
     } finally {
       setDeleteModal({ open: false, sessionId: null });
     }
@@ -165,9 +165,7 @@ export default function SessionBuilder({ notify }) {
 
   const handlePause = async (id) => {
     try {
-      const res = await fetch(`/api/sessions/${id}/pause`, { method: "POST" });
-      if (!res.ok) throw new Error("Failed to pause session");
-      const updated = await res.json();
+      const updated = await apiFetch(`/api/sessions/${id}/pause`, { method: "POST" }, auth);
       setSessions((prev) => prev.map((s) => (s.id === id ? updated : s)));
       notify?.("Session paused.");
     } catch (e) {
@@ -178,9 +176,7 @@ export default function SessionBuilder({ notify }) {
 
   const handleResume = async (id) => {
     try {
-      const res = await fetch(`/api/sessions/${id}/resume`, { method: "POST" });
-      if (!res.ok) throw new Error("Failed to resume session");
-      const updated = await res.json();
+      const updated = await apiFetch(`/api/sessions/${id}/resume`, { method: "POST" }, auth);
       setSessions((prev) => prev.map((s) => (s.id === id ? updated : s)));
       notify?.("Session resumed.");
     } catch (e) {
@@ -191,9 +187,7 @@ export default function SessionBuilder({ notify }) {
 
     const handleArchive = async (id) => {
     try {
-      const res = await fetch(`/api/sessions/${id}/archive`, { method: "POST" });
-      if (!res.ok) throw new Error("Failed to archive session");
-      const updated = await res.json();
+      await apiFetch(`/api/sessions/${id}/archive`, { method: "POST" }, auth);
       notify?.("Session archived.");
       // Reload sessions so it disappears from Active and shows in Archived
       loadAll();

@@ -37,10 +37,12 @@ beforeEach(() => {
   fetchCalls.length = 0;
   global.fetch = vi.fn((url) => {
     fetchCalls.push(String(url));
+    const body = { id: "s1", tasks: [], responses: [], status: "in_progress" };
     return Promise.resolve({
       ok: true,
       status: 200,
-      json: () => Promise.resolve({ id: "s1", tasks: [], responses: [], status: "in_progress" }),
+      json: () => Promise.resolve(body),
+      text: () => Promise.resolve(JSON.stringify(body)),
     });
   });
 });
