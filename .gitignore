@@ -159,3 +159,6 @@ storybook-static
 scripts-d56-playwright-finish.cjs
 scripts-d56-playwright.cjs
 seed-d56-walk.mjs
+scripts-login-dump.cjs
+scripts-new-session-walk.cjs
+scripts-ui-walk.cjs
