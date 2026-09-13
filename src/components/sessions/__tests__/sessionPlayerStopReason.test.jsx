@@ -7,10 +7,16 @@
 // assertion on SessionPlayer.jsx pins that data.stopped is actually read —
 // ignoring that field is the defect, and rendering tests cannot catch a
 // component that never looks at it if the mock also omits taskId.
+//
+// D59 added the same heading to the session-detail header. The ending
+// panel is briefly unmounted while loadNextTask sets loadingTask, so a
+// findByText("Measurement target met") can resolve on the header (or on
+// a panel that then unmounts) and fail toBeInTheDocument. Wait for
+// /next-task, then assert the ending panel by test id.
 
 import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import fs from "fs";
 import path from "path";
@@ -69,6 +75,7 @@ describe("SessionPlayer — measurement stop copy (D58)", () => {
 
   it("reads data.stopped from next-task (mutation: deleting that read fails this)", () => {
     expect(playerSrc).toMatch(/data\?\.stopped/);
+    expect(playerSrc).toMatch(/data-testid="measurement-stop-panel"/);
   });
 
   it("shows the stop reason rather than 'No more tasks available'", async () => {
@@ -78,17 +85,18 @@ describe("SessionPlayer — measurement stop copy (D58)", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByTestId("session-detail-stop")).toHaveTextContent(
-      "Measurement target met"
-    );
-    expect(await screen.findByText(/attrA: master/)).toBeInTheDocument();
-    expect(screen.getByText(STOPPED.reason)).toBeInTheDocument();
-    expect(screen.queryByText("No more tasks available.")).toBeNull();
-
     await waitFor(() => {
       expect(
         global.fetch.mock.calls.some(([url]) => String(url).includes("/next-task"))
       ).toBe(true);
     });
+
+    const panel = await screen.findByTestId("measurement-stop-panel");
+    expect(panel).toBeInTheDocument();
+    expect(within(panel).getByText("Measurement target met")).toBeInTheDocument();
+    expect(within(panel).getByText(STOPPED.reason)).toBeInTheDocument();
+    expect(within(panel).getByText(/attrA: master/)).toBeInTheDocument();
+    expect(screen.getByTestId("session-detail-stop")).toHaveTextContent("Measurement target met");
+    expect(screen.queryByText("No more tasks available.")).toBeNull();
   });
 });

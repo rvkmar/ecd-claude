@@ -799,7 +799,7 @@ export default function SessionPlayer({
       {loadingTask ? (
         <div>Loading next activity...</div>
       ) : measurementStop ? (
-        <div className="p-4 border rounded bg-green-50">
+        <div className="p-4 border rounded bg-green-50" data-testid="measurement-stop-panel">
           <p className="font-medium">{measurementStopHeading(measurementStop)}</p>
           <p className="text-sm text-gray-700 mt-1">{measurementStop.reason}</p>
           {measurementStopDetails(measurementStop).length > 0 && (
