@@ -14,64 +14,70 @@
 // this file's only job is "does a request with no token get rejected
 // before it reaches any route handler."
 
-import { beforeAll, describe, it, expect } from "vitest";
+import { describe, it, expect } from "vitest";
 import express from "express";
 import request from "supertest";
 
-// Heavy routers (reportsRoutes especially) pay a cold dynamic-import cost
-// that already approached 12.5s under a WSL full-suite run that creates
-// jsdom 61 times. Each describe used to import twice (GET + garbage-token),
-// so the second cold path could push past 15s. Import once per describe
-// and share a 30s budget so contention still has headroom. This is a
-// slow-import timing issue, not a behavioral flake — do not retry or
-// weaken the 401/403 assertions.
-const COLD_IMPORT_TIMEOUT_MS = 30000;
+// Static top-level imports on purpose. Under a WSL full-suite run that
+// creates jsdom 61 times, a mid-suite cold dynamic import of reportsRoutes
+// alone can exceed a 30s beforeAll hookTimeout even after caching one
+// importer() per describe. Loading every protected router here moves that
+// cost to file evaluation — once, before any hook clock starts — so this
+// file stays a static auth-boundary check. hookTimeout does not apply to
+// module evaluation; if a worker ever looks hung it is collection-time
+// load under contention, not a failed 401/403 assertion. Do not swap
+// these back to importer() / beforeAll, and do not "fix" a slow collect
+// by bumping hookTimeout alone.
+import sessionRoutes from "../sessionRoutes.js";
+import itemsRoutes from "../itemsRoutes.js";
+import itemAnalyticsRoutes from "../itemAnalyticsRoutes.js";
+import competencyModels from "../competencyModels.js";
+import evidenceModels from "../evidenceModels.js";
+import tasksRoutes from "../tasksRoutes.js";
+import taskModelsRoutes from "../taskModelsRoutes.js";
+import reportsRoutes from "../reportsRoutes.js";
+import studentsRoutes from "../studentsRoutes.js";
+import policiesRoutes from "../policiesRoutes.js";
+import calibrationRoutes from "../calibrationRoutes.js";
+import qMatrixModelsRoutes from "../qMatrixModelsRoutes.js";
+import assemblyModelsRoutes from "../assemblyModelsRoutes.js";
+import compositeLibraryRoutes from "../compositeLibraryRoutes.js";
 
 // One router per previously-unauthenticated route file, plus the base path
 // it's normally mounted at in server/index.js (used only for a readable
 // test name — supertest hits the router directly, mount path doesn't
 // matter for the assertion itself).
 const PROTECTED_ROUTERS = [
-  { name: "sessionRoutes", path: "/api/sessions", importer: () => import("../sessionRoutes.js") },
-  { name: "itemsRoutes", path: "/api/items", importer: () => import("../itemsRoutes.js") },
-  { name: "itemAnalyticsRoutes", path: "/api/itemAnalytics", importer: () => import("../itemAnalyticsRoutes.js") },
-  { name: "competencyModels", path: "/api/competencies", importer: () => import("../competencyModels.js") },
-  { name: "evidenceModels", path: "/api/evidenceModels", importer: () => import("../evidenceModels.js") },
-  { name: "tasksRoutes", path: "/api/tasks", importer: () => import("../tasksRoutes.js") },
-  { name: "taskModelsRoutes", path: "/api/taskModels", importer: () => import("../taskModelsRoutes.js") },
-  { name: "reportsRoutes", path: "/api/reports", importer: () => import("../reportsRoutes.js") },
-  { name: "studentsRoutes", path: "/api/students", importer: () => import("../studentsRoutes.js") },
-  { name: "policiesRoutes", path: "/api/policies", importer: () => import("../policiesRoutes.js") },
-  { name: "calibrationRoutes", path: "/api/calibrate", importer: () => import("../calibrationRoutes.js") },
+  { name: "sessionRoutes", path: "/api/sessions", router: sessionRoutes },
+  { name: "itemsRoutes", path: "/api/items", router: itemsRoutes },
+  { name: "itemAnalyticsRoutes", path: "/api/itemAnalytics", router: itemAnalyticsRoutes },
+  { name: "competencyModels", path: "/api/competencies", router: competencyModels },
+  { name: "evidenceModels", path: "/api/evidenceModels", router: evidenceModels },
+  { name: "tasksRoutes", path: "/api/tasks", router: tasksRoutes },
+  { name: "taskModelsRoutes", path: "/api/taskModels", router: taskModelsRoutes },
+  { name: "reportsRoutes", path: "/api/reports", router: reportsRoutes },
+  { name: "studentsRoutes", path: "/api/students", router: studentsRoutes },
+  { name: "policiesRoutes", path: "/api/policies", router: policiesRoutes },
+  { name: "calibrationRoutes", path: "/api/calibrate", router: calibrationRoutes },
   // D48: the three collections that had schema and lifecycle validation
   // but no HTTP surface at all. They join this list on the day their
   // routers are created, so the gate can never be removed silently.
-  { name: "qMatrixModelsRoutes", path: "/api/qMatrixModels", importer: () => import("../qMatrixModelsRoutes.js") },
-  { name: "assemblyModelsRoutes", path: "/api/assemblyModels", importer: () => import("../assemblyModelsRoutes.js") },
-  { name: "compositeLibraryRoutes", path: "/api/compositeLibrary", importer: () => import("../compositeLibraryRoutes.js") },
+  { name: "qMatrixModelsRoutes", path: "/api/qMatrixModels", router: qMatrixModelsRoutes },
+  { name: "assemblyModelsRoutes", path: "/api/assemblyModels", router: assemblyModelsRoutes },
+  { name: "compositeLibraryRoutes", path: "/api/compositeLibrary", router: compositeLibraryRoutes },
 ];
 
 describe.each(PROTECTED_ROUTERS)(
   "$name requires authentication",
-  ({ path, importer }) => {
-    let router;
+  ({ path, router }) => {
+    it("rejects GET / with no Authorization header (401)", async () => {
+      const app = express();
+      app.use(express.json());
+      app.use(path, router);
 
-    beforeAll(async () => {
-      ({ default: router } = await importer());
-    }, COLD_IMPORT_TIMEOUT_MS);
-
-    it(
-      "rejects GET / with no Authorization header (401)",
-      async () => {
-        const app = express();
-        app.use(express.json());
-        app.use(path, router);
-
-        const res = await request(app).get(path + "/");
-        expect(res.status).toBe(401);
-      },
-      COLD_IMPORT_TIMEOUT_MS
-    );
+      const res = await request(app).get(path + "/");
+      expect(res.status).toBe(401);
+    });
 
     it("rejects a request with a garbage Authorization header (403)", async () => {
       const app = express();
