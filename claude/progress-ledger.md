@@ -10,7 +10,7 @@ Restored 2026-09-13 at D58 close. The file was missing from the repo; this recon
 | Next queued | **D59** — report split / attribute profile / examinee leak |
 | Block | W12 — Activity Selection, stopping, reporting |
 | Block gate | Sessions end on an accuracy target, not only on length; attribute-profile report renders |
-| Gate status | Stopping **evaluates and persists**; player can **show** the reason (tests). Attribute-profile **report** is D59. Live diagnostic stop in a browser not walked. |
+| Gate status | Stopping **evaluates, persists, and shows** in the student player (live, 2026-09-13). Attribute-profile **report** is D59. |
 | HEAD at D58 code | `ede5f33` |
 | HEAD at this close | see close commit |
 
@@ -18,7 +18,7 @@ Restored 2026-09-13 at D58 close. The file was missing from the repo; this recon
 
 | Date (IST) | Units | Tier mix | Notes |
 |---|---|---|---|
-| 2026-09-13 | D58 | 2, alone | Premise rewritten: no new orchestrator. Persist `session.stopped`; player reads `data.stopped`. D57 author copy updated. Full suite this close did not finish (27 worker timeouts); D58 files 55/55; build clean. |
+| 2026-09-13 | D58 | 2, alone | Premise rewritten: no new orchestrator. Persist `session.stopped`; player reads `data.stopped`. Live player walk later the same day: `s1789288381307` showed "Measurement target met" / attrA master 0.95. |
 
 ## Compression debt
 
@@ -27,7 +27,7 @@ Restored 2026-09-13 at D58 close. The file was missing from the repo; this recon
 | D50 | District/teacher browser pass skipped | Human logins | D71 | open |
 | D55 | Entire W11 accessibility audit skipped | Never scheduled after Q-matrix/Assembly shipped | Re-date at W12 close or before D73 | **open, past one block close → standing risk** |
 | D56 | Adaptive selection not live-browser | Tests only | D71 | open |
-| D58 | Live diagnostic-session ending screen not walked | Component + route tests; student login not used this session | D71 | open |
+| D58 | Live diagnostic-session ending screen not walked at first close | Walked later 2026-09-13 on `s1789288381307` | D58 | **closed** |
 | D57 | Author UI said accuracy was unevaluated | Folded into D58 | D58 | **closed** |
 | D46 | Phase-2 `apiFetch` | — | — | **closed** (`e533a77` / PRs #5–#6) |
 | D54 | Wizard readiness mirror has no agreement test | Token | W12 close | open |
