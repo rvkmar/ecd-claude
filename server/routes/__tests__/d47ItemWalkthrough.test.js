@@ -24,6 +24,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { describe, it, expect, beforeAll } from "vitest";
+import { seedActivePackages } from "../../test/seedActivePackage.js";
 
 const scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), "ecd-d47-"));
 const scratchDbFile = path.join(scratchDir, "db.json");
@@ -172,7 +173,7 @@ beforeAll(async () => {
   fs.writeFileSync(
     scratchDbFile,
     JSON.stringify(
-      {
+      seedActivePackages({
         competencyModels: [competencyModel],
         competencies: [{ id: "c-d47", modelId: "cm-d47" }],
         evidenceModels: [evidenceModel],
@@ -182,7 +183,7 @@ beforeAll(async () => {
         sessions: [],
         questions: [],
         users: [],
-      },
+      }),
       null,
       2
     )

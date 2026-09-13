@@ -4,6 +4,7 @@
 **Date:** 2026-08-28 (Day 20, Week 4)
 **Deciders:** ecd-claude build
 **Depends on:** Day 19's `compositeLibrary` schema (`src/utils/schema.js`)
+**Addendum:** [0003a — Identification reads the active package](0003a-identification-reads-the-active-package.md) (Day 49c)
 
 ## Context
 

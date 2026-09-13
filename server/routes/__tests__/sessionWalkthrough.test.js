@@ -26,6 +26,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import express from "express";
 import request from "supertest";
+import { seedActivePackages } from "../../test/seedActivePackage.js";
 
 vi.mock("../../utils/authMiddleware.js", () => ({
   authenticateToken: (req, _res, next) => {
@@ -159,7 +160,7 @@ const itemFractionComparison = makeItem({
 });
 
 function makeDb() {
-  return {
+  return seedActivePackages({
     sessions: [{
       id: "s1",
       studentId: "student-1",
@@ -178,7 +179,7 @@ function makeDb() {
     taskModels: [taskModel],
     evidenceModels: [evidenceModel],
     items: [itemEquivalentFractions, itemFractionComparison],
-  };
+  });
 }
 
 function buildApp(db) {
