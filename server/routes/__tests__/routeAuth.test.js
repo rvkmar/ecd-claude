@@ -1,3 +1,4 @@
+// @vitest-environment node
 // server/routes/__tests__/routeAuth.test.js
 //
 // This is the single most important test file from the Phase 1 security
@@ -13,9 +14,18 @@
 // this file's only job is "does a request with no token get rejected
 // before it reaches any route handler."
 
-import { describe, it, expect } from "vitest";
+import { beforeAll, describe, it, expect } from "vitest";
 import express from "express";
 import request from "supertest";
+
+// Heavy routers (reportsRoutes especially) pay a cold dynamic-import cost
+// that already approached 12.5s under a WSL full-suite run that creates
+// jsdom 61 times. Each describe used to import twice (GET + garbage-token),
+// so the second cold path could push past 15s. Import once per describe
+// and share a 30s budget so contention still has headroom. This is a
+// slow-import timing issue, not a behavioral flake — do not retry or
+// weaken the 401/403 assertions.
+const COLD_IMPORT_TIMEOUT_MS = 30000;
 
 // One router per previously-unauthenticated route file, plus the base path
 // it's normally mounted at in server/index.js (used only for a readable
@@ -44,10 +54,15 @@ const PROTECTED_ROUTERS = [
 describe.each(PROTECTED_ROUTERS)(
   "$name requires authentication",
   ({ path, importer }) => {
+    let router;
+
+    beforeAll(async () => {
+      ({ default: router } = await importer());
+    }, COLD_IMPORT_TIMEOUT_MS);
+
     it(
       "rejects GET / with no Authorization header (401)",
       async () => {
-        const { default: router } = await importer();
         const app = express();
         app.use(express.json());
         app.use(path, router);
@@ -55,20 +70,10 @@ describe.each(PROTECTED_ROUTERS)(
         const res = await request(app).get(path + "/");
         expect(res.status).toBe(401);
       },
-      // sessionRoutes' cold dynamic import occasionally exceeds the default
-      // 5000ms under memory pressure on a constrained CI/sandbox runner; this
-      // is a slow-import timing issue, not a behavioral flake, so a longer
-      // budget is the correct fix rather than a retry.
-      //
-      // D49b removed the largest single contributor: a dead `mathjs` import
-      // that was never called. The budget is kept as headroom -- the module
-      // still pulls in the whole delivery layer -- but the specific cost this
-      // comment used to name is gone.
-      15000
+      COLD_IMPORT_TIMEOUT_MS
     );
 
     it("rejects a request with a garbage Authorization header (403)", async () => {
-      const { default: router } = await importer();
       const app = express();
       app.use(express.json());
       app.use(path, router);
