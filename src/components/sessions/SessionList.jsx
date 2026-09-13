@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import Modal from "../ui/Modal";
-import { SESSION_STATUS } from "@/utils/sessionStatus";
 import { measurementStopHeading } from "./measurementStop";
+import { canPauseSession } from "@/utils/sessionPlay";
 
 // SessionList.jsx
 // Presentational list for sessions. Receives `sessions` and optional `students`.
@@ -173,7 +173,7 @@ export default function SessionList({
           </div>
 
           <div className="flex flex-col space-y-2 w-1/4 items-end">
-            {s.status === SESSION_STATUS.IN_PROGRESS && (
+            {canPauseSession(s) && (
               <>
                 <button
                   onClick={() => onPlay(s)}

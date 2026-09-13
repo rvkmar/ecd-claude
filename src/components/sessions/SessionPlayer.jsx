@@ -6,6 +6,7 @@ import { usePolicies } from "../../api/queries/policies";
 import { useAuth } from "../../auth/AuthProvider";
 import { apiFetch, apiErrorMessage } from "../../api/apiClient";
 import { SESSION_STATUS } from "../../utils/sessionStatus";
+import { canPauseSession } from "../../utils/sessionPlay";
 import { measurementStopHeading, measurementStopDetails } from "./measurementStop";
 
 import { useNavigate, useParams } from "react-router-dom";
@@ -251,6 +252,7 @@ export default function SessionPlayer({
 
   useEffect(() => {
     if (!session) return;
+    if (session.status === SESSION_STATUS.PAUSED) return;
     loadNextTask();
     // reset UI inputs
     setSelectedOptionId(null);
@@ -663,6 +665,38 @@ export default function SessionPlayer({
   };
 
 
+  async function handlePause() {
+    if (!sessionIdRef.current) return;
+    try {
+      const updated = await apiFetch(
+        `/api/sessions/${sessionIdRef.current}/pause`,
+        { method: "POST" },
+        auth
+      );
+      setSession((prev) => ({ ...(prev || {}), ...(updated || {}), status: updated?.status || "paused" }));
+      notify("Session paused.");
+    } catch (e) {
+      console.error(e);
+      notify("❌ Failed to pause session");
+    }
+  }
+
+  async function handleResume() {
+    if (!sessionIdRef.current) return;
+    try {
+      const updated = await apiFetch(
+        `/api/sessions/${sessionIdRef.current}/resume`,
+        { method: "POST" },
+        auth
+      );
+      setSession((prev) => ({ ...(prev || {}), ...(updated || {}) }));
+      notify("Session resumed.");
+    } catch (e) {
+      console.error(e);
+      notify("❌ Failed to resume session");
+    }
+  }
+
   async function confirmFinish() {
     setFinishing(true);
     try {
@@ -775,6 +809,26 @@ export default function SessionPlayer({
               {measurementStopHeading(session.stopped)}
               {session.stopped.reason ? ` — ${session.stopped.reason}` : ""}
             </div>
+          )}
+        </div>
+        <div className="flex items-center space-x-2">
+          {canPauseSession(session, { reviewMode: isTeacher }) && (
+            <button
+              type="button"
+              onClick={handlePause}
+              className="bg-orange-500 text-white px-3 py-1 rounded hover:bg-orange-600"
+            >
+              Pause
+            </button>
+          )}
+          {session?.status === SESSION_STATUS.PAUSED && !isTeacher && (
+            <button
+              type="button"
+              onClick={handleResume}
+              className="bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600"
+            >
+              Resume
+            </button>
           )}
         </div>
       </div>

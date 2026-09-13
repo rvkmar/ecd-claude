@@ -3,6 +3,7 @@ import { authenticateToken, authorizeRole } from "../utils/authMiddleware.js";
 import { loadDB, saveDB, finishSession } from "../../src/utils/db-server.js";
 import { validateEntity } from "../../src/utils/schema.js";
 import { SESSION_STATUS } from "../../src/utils/sessionStatus.js";
+import { attendableSessionsForStudent } from "../../src/utils/sessionPlay.js";
 import { identifyEvidence } from "../delivery/evidenceIdentification.js";
 import {
   accumulateEvidence,
@@ -164,6 +165,24 @@ router.get("/archived", (req, res) => {
   if (!db.sessions) db.sessions = [];
   const archived = db.sessions.filter((s) => s.status === "archived");
   res.json(archived);
+});
+
+// ------------------------------
+// GET /api/sessions/mine
+// ------------------------------
+// Student discovery. Staff already have /active; students had no UI and
+// no filtered list. Must be registered before /:id so "mine" is not
+// treated as a session id.
+router.get("/mine", (req, res) => {
+  const db = loadDB();
+  const sessions = db.sessions || [];
+  const students = db.students || [];
+  const user = req.user || {};
+  if (user.role === "student") {
+    return res.json(attendableSessionsForStudent(sessions, user, students));
+  }
+  const live = sessions.filter((s) => s.status !== "archived");
+  res.json(live);
 });
 
 // ------------------------------

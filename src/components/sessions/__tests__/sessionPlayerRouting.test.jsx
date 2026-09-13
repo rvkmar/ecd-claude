@@ -119,6 +119,20 @@ describe("App routing — a student can be routed to a session (F7)", () => {
     ).toMatch(/path="sessions\/:sessionId\/player"/);
   });
 
+  it("registers the same player route for district and teacher (staff Play)", () => {
+    const district = live.slice(live.indexOf('path="/district/*"'), live.indexOf('path="/teacher/*"'));
+    const teacher = live.slice(live.indexOf('path="/teacher/*"'), live.indexOf('path="/student/*"'));
+    expect(
+      district,
+      "district must register sessions/:sessionId/player so Play does not hit the /login catch-all"
+    ).toMatch(/path="sessions\/:sessionId\/player"/);
+    expect(
+      teacher,
+      "teacher must register sessions/:sessionId/player so Play does not hit the /login catch-all"
+    ).toMatch(/path="sessions\/:sessionId\/player"/);
+    expect(live).toMatch(/path="\/sessions\/:sessionId\/player"/);
+  });
+
   it("does not render StudentDashboard for every /student/* path", () => {
     // The original shape was `path="/student/*" element={<ProtectedRoute...>
     // <StudentDashboard /></ProtectedRoute>}` with no nested <Routes>, which
