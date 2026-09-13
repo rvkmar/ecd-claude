@@ -9,9 +9,11 @@
 
 import { describe, it, expect } from "vitest";
 import { identifyEvidence } from "../evidenceIdentification.js";
+import { seedActivePackages } from "../../test/seedActivePackage.js";
 
 const evidenceModel = {
   id: "em-numerical-reasoning",
+  versionNumber: 1,
   observables: [
     {
       id: "o1",
@@ -26,10 +28,26 @@ const evidenceModel = {
   ],
 };
 
+const taskModel = {
+  id: "tm-numerical-reasoning",
+  versionNumber: 1,
+  status: "operational",
+  locked: true,
+  evidenceModelIds: ["em-numerical-reasoning"],
+  expectedObservations: [
+    { observationId: "o1", evidenceModelId: "em-numerical-reasoning", required: true, weight: 1 },
+    { observationId: "o2", evidenceModelId: "em-numerical-reasoning", required: true, weight: 1 },
+  ],
+};
+
 const equivalentFractionsItem = {
   id: "item-equivalent-fractions",
+  taskModelId: "tm-numerical-reasoning",
+  taskModelVersion: 1,
+  status: "confirmed",
   observationId: "o1",
   evidenceModelId: "em-numerical-reasoning",
+  evidenceModelVersion: 1,
   scoring: {
     method: "dichotomous",
     evidenceActivationMap: [
@@ -41,8 +59,12 @@ const equivalentFractionsItem = {
 
 const fractionComparisonItem = {
   id: "item-fraction-comparison",
+  taskModelId: "tm-numerical-reasoning",
+  taskModelVersion: 1,
+  status: "confirmed",
   observationId: "o2",
   evidenceModelId: "em-numerical-reasoning",
+  evidenceModelVersion: 1,
   scoring: {
     method: "dichotomous",
     evidenceActivationMap: [
@@ -53,12 +75,29 @@ const fractionComparisonItem = {
 };
 
 function makeDb(overrides = {}) {
-  return { evidenceModels: [evidenceModel], ...overrides };
+  const { compositeLibrary, ...rest } = overrides;
+  const db = {
+    evidenceModels: [evidenceModel],
+    taskModels: [taskModel],
+    items: [equivalentFractionsItem, fractionComparisonItem],
+    ...rest,
+  };
+  if (compositeLibrary !== undefined) {
+    db.compositeLibrary = compositeLibrary;
+  } else {
+    seedActivePackages(db);
+  }
+  return db;
+}
+
+/** Identify against a package compiled from `item` (and any extra overrides). */
+function identify(workProduct, item, overrides = {}) {
+  return identifyEvidence(workProduct, item, makeDb({ items: [item], ...overrides }));
 }
 
 describe("identifyEvidence — happy path against the repo's own worked example", () => {
   it("returns an activated Observable Variable value for a response that activates the observable", () => {
-    const result = identifyEvidence({ selected: "opt_a" }, equivalentFractionsItem, makeDb());
+    const result = identify({ selected: "opt_a" }, equivalentFractionsItem);
 
     expect(result).toEqual({
       observationId: "o1",
@@ -71,7 +110,7 @@ describe("identifyEvidence — happy path against the repo's own worked example"
   });
 
   it("returns a non-activated value for a distractor response, via array-membership matching", () => {
-    const result = identifyEvidence({ selected: "opt_c" }, equivalentFractionsItem, makeDb());
+    const result = identify({ selected: "opt_c" }, equivalentFractionsItem);
 
     expect(result.activated).toBe(false);
     expect(result.direction).toBe("supports"); // the observable's declared direction, regardless of activation
@@ -79,7 +118,7 @@ describe("identifyEvidence — happy path against the repo's own worked example"
   });
 
   it("falls back to evidenceModel.evidenceRules[] when the observable has no embedded evidenceRule", () => {
-    const result = identifyEvidence({ selected: "opt_b" }, fractionComparisonItem, makeDb());
+    const result = identify({ selected: "opt_b" }, fractionComparisonItem);
 
     expect(result.activated).toBe(true);
     expect(result.direction).toBe("supports");
@@ -94,7 +133,7 @@ describe("identifyEvidence — never emits a score", () => {
       [{ selected: "opt_c" }, equivalentFractionsItem],
       [{ selected: "opt_b" }, fractionComparisonItem],
     ]) {
-      const result = identifyEvidence(workProduct, item, makeDb());
+      const result = identify(workProduct, item);
       const keys = Object.keys(result);
       expect(keys).not.toContain("score");
       expect(keys).not.toContain("scoredValue");
@@ -105,24 +144,31 @@ describe("identifyEvidence — never emits a score", () => {
 });
 
 describe("identifyEvidence — degrades gracefully rather than throwing", () => {
-  it("warns (but does not throw) for an unknown evidenceModelId", () => {
+  it("scores from the package-baked map when the evidence model did not resolve at compile time", () => {
+    // Pre-D49c this re-walked db.evidenceModels and warned. The package still
+    // bakes the item's activation map; direction is null because no
+    // evidenceRule resolved. Identification must not consult a live EM.
     const item = { ...equivalentFractionsItem, evidenceModelId: "em-ghost" };
-    const result = identifyEvidence({ selected: "opt_a" }, item, makeDb());
+    const result = identify({ selected: "opt_a" }, item);
 
-    expect(result.activated).toBeNull();
-    expect(result.warning).toMatch(/references unknown evidenceModelId 'em-ghost'/);
+    expect(result.refused).toBeUndefined();
+    expect(result.activated).toBe(true);
+    expect(result.direction).toBeNull();
+    expect(result.strength).toBe(4);
   });
 
-  it("warns (but does not throw) for an observationId with no matching observable", () => {
+  it("scores from the package-baked map when the compiled evidenceRule is missing", () => {
     const item = { ...equivalentFractionsItem, observationId: "o-does-not-exist" };
-    const result = identifyEvidence({ selected: "opt_a" }, item, makeDb());
+    const result = identify({ selected: "opt_a" }, item);
 
-    expect(result.activated).toBeNull();
-    expect(result.warning).toMatch(/has no observable 'o-does-not-exist'/);
+    expect(result.refused).toBeUndefined();
+    expect(result.activated).toBe(true);
+    expect(result.direction).toBeNull();
+    expect(result.observableId).toBe("o-does-not-exist");
   });
 
   it("warns (but does not throw) when the work product matches no declared responsePattern", () => {
-    const result = identifyEvidence({ selected: "opt_z" }, equivalentFractionsItem, makeDb());
+    const result = identify({ selected: "opt_z" }, equivalentFractionsItem);
 
     expect(result.activated).toBeNull();
     expect(result.direction).toBe("supports"); // still resolvable even without a pattern match
@@ -131,7 +177,7 @@ describe("identifyEvidence — degrades gracefully rather than throwing", () => 
 
   it("handles an item with no evidenceActivationMap at all (empty, not missing)", () => {
     const item = { ...equivalentFractionsItem, scoring: {} };
-    const result = identifyEvidence({ selected: "opt_a" }, item, makeDb());
+    const result = identify({ selected: "opt_a" }, item);
     expect(result.activated).toBeNull();
     expect(result.warning).toMatch(/did not match any declared responsePattern/);
   });
@@ -147,7 +193,7 @@ describe("identifyEvidence — degrades gracefully rather than throwing", () => 
 
 describe("identifyEvidence — response pattern matching semantics", () => {
   it("does not match a pattern object against a work product missing the relevant key", () => {
-    const result = identifyEvidence({}, equivalentFractionsItem, makeDb());
+    const result = identify({}, equivalentFractionsItem);
     expect(result.activated).toBeNull();
   });
 
@@ -160,8 +206,8 @@ describe("identifyEvidence — response pattern matching semantics", () => {
         ],
       },
     };
-    expect(identifyEvidence({ selected: "opt_a", confidence: "low" }, multiKeyItem, makeDb()).activated).toBeNull();
-    expect(identifyEvidence({ selected: "opt_a", confidence: "high" }, multiKeyItem, makeDb()).activated).toBe(true);
+    expect(identify({ selected: "opt_a", confidence: "low" }, multiKeyItem).activated).toBeNull();
+    expect(identify({ selected: "opt_a", confidence: "high" }, multiKeyItem).activated).toBe(true);
   });
 
   // FIXED (Day 27 adversarial review): `matchesResponsePattern` now
@@ -177,7 +223,7 @@ describe("identifyEvidence — response pattern matching semantics", () => {
         ],
       },
     };
-    const result = identifyEvidence({ totally: "unrelated", shape: 123 }, itemWithEmptyPattern, makeDb());
+    const result = identify({ totally: "unrelated", shape: 123 }, itemWithEmptyPattern);
     expect(result.activated).toBeNull();
     expect(result.warning).toMatch(/did not match any declared responsePattern/);
   });
@@ -195,7 +241,7 @@ describe("identifyEvidence — response pattern matching semantics", () => {
         ],
       },
     };
-    const result = identifyEvidence({ selected: "opt_a" }, itemWithLeadingEmptyPattern, makeDb());
+    const result = identify({ selected: "opt_a" }, itemWithLeadingEmptyPattern);
     expect(result.activated).toBe(false);
     expect(result.rationale).toBe("The real rule, now reachable.");
   });
@@ -216,9 +262,9 @@ describe("identifyEvidence — response pattern matching semantics", () => {
         ],
       },
     };
-    expect(identifyEvidence({ selected: ["opt_a"] }, multiSelectItem, makeDb()).activated).toBe(true);
-    expect(identifyEvidence({ selected: ["opt_a", "opt_c"] }, multiSelectItem, makeDb()).activated).toBe(true);
-    expect(identifyEvidence({ selected: ["opt_c", "opt_d"] }, multiSelectItem, makeDb()).activated).toBeNull();
+    expect(identify({ selected: ["opt_a"] }, multiSelectItem).activated).toBe(true);
+    expect(identify({ selected: ["opt_a", "opt_c"] }, multiSelectItem).activated).toBe(true);
+    expect(identify({ selected: ["opt_c", "opt_d"] }, multiSelectItem).activated).toBeNull();
   });
 
   it("a single-valued pattern matches a multi-select work product that includes it", () => {
@@ -230,8 +276,8 @@ describe("identifyEvidence — response pattern matching semantics", () => {
         ],
       },
     };
-    expect(identifyEvidence({ selected: ["opt_a", "opt_c"] }, item, makeDb()).activated).toBe(true);
-    expect(identifyEvidence({ selected: ["opt_c", "opt_d"] }, item, makeDb()).activated).toBeNull();
+    expect(identify({ selected: ["opt_a", "opt_c"] }, item).activated).toBe(true);
+    expect(identify({ selected: ["opt_c", "opt_d"] }, item).activated).toBeNull();
   });
 
   it("handles falsy pattern/work-product values (0, false, empty string) with strict equality, no loose coercion", () => {
@@ -244,10 +290,10 @@ describe("identifyEvidence — response pattern matching semantics", () => {
       },
     };
     // Exact falsy match succeeds.
-    expect(identifyEvidence({ score: 0 }, zeroScoreItem, makeDb()).activated).toBe(true);
+    expect(identify({ score: 0 }, zeroScoreItem).activated).toBe(true);
     // A different falsy value does NOT loosely coerce to match (0 !== false, 0 !== "").
-    expect(identifyEvidence({ score: false }, zeroScoreItem, makeDb()).activated).toBeNull();
-    expect(identifyEvidence({ score: "" }, zeroScoreItem, makeDb()).activated).toBeNull();
+    expect(identify({ score: false }, zeroScoreItem).activated).toBeNull();
+    expect(identify({ score: "" }, zeroScoreItem).activated).toBeNull();
   });
 });
 
@@ -267,7 +313,7 @@ describe("identifyEvidence — activation map authoring gaps", () => {
         ],
       },
     };
-    const result = identifyEvidence({ selected: "opt_a" }, itemMissingFlag, makeDb());
+    const result = identify({ selected: "opt_a" }, itemMissingFlag);
     expect(result.activated).toBeNull();
     expect(result.warning).toMatch(/does not declare activatesObservable as a boolean/);
   });
@@ -293,7 +339,7 @@ describe("identifyEvidence — activation map authoring gaps", () => {
         ],
       },
     };
-    const result = identifyEvidence({ selected: "opt_a" }, overlappingItem, makeDb());
+    const result = identify({ selected: "opt_a" }, overlappingItem);
     expect(result.activated).toBe(true); // first entry wins
     expect(result.rationale).toBe("Specific rule, declared first.");
     expect(result.warning).toBeUndefined(); // no signal that entry 2 also matched
@@ -318,15 +364,19 @@ describe("identifyEvidence — strength resolution when nothing declares a stren
     };
     const item = {
       id: "item-no-strength",
+      taskModelId: "tm-numerical-reasoning",
+      taskModelVersion: 1,
+      status: "confirmed",
       observationId: "o1",
       evidenceModelId: "em-no-strength",
+      evidenceModelVersion: 1,
       scoring: {
         evidenceActivationMap: [
           { responsePattern: { selected: "opt_a" }, activatesObservable: true, rationale: "No strength info anywhere." }, // no strengthOverride
         ],
       },
     };
-    const result = identifyEvidence({ selected: "opt_a" }, item, makeDb({ evidenceModels: [noStrengthEvidenceModel] }));
+    const result = identify({ selected: "opt_a" }, item, { evidenceModels: [noStrengthEvidenceModel] });
     expect(result.activated).toBe(true);
     expect(result.strength).toBeNull();
     expect(Number.isNaN(result.strength)).toBe(false);

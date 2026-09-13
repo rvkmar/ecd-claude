@@ -1,28 +1,32 @@
 // server/delivery/evidenceIdentification.js
 //
 // Day 27 (Week 6): "Evidence Identification — the break that makes
-// everything upstream inert" (build reference Part 2, Step 25). Applies an
-// item's `scoring.evidenceActivationMap[]` against the bound Evidence
-// Model's observable to turn a raw work product into an OBSERVABLE
-// VARIABLE VALUE. The output is deliberately NOT a score, NOT a
-// correct/incorrect flag, and NOT a point value -- Evidence Accumulation
-// (Week 7-8) is where a measurement model turns this into a posterior
-// update. Conflating the two here is exactly the bug Day 26's map found:
-// SessionPlayer.jsx computes "correctness" client-side today by comparing
-// a `correctOptionId` field questionsRoutes.js never writes, so every MCQ
-// submission silently scores 0 regardless of the answer. This module
-// replaces that comparison outright, not ports it.
+// everything upstream inert" (build reference Part 2, Step 25). Applies
+// an item's evidence-activation map against the bound evidence rule to
+// turn a raw work product into an OBSERVABLE VARIABLE VALUE. The output
+// is deliberately NOT a score, NOT a correct/incorrect flag, and NOT a
+// point value -- Evidence Accumulation (Week 7-8) is where a measurement
+// model turns this into a posterior update. Conflating the two here is
+// exactly the bug Day 26's map found: SessionPlayer.jsx computes
+// "correctness" client-side today by comparing a `correctOptionId` field
+// questionsRoutes.js never writes, so every MCQ submission silently
+// scores 0 regardless of the answer. This module replaces that
+// comparison outright, not ports it.
+//
+// D49c: structural facts come from the ACTIVE compositeLibrary package
+// for the item's Task Model (ADR 0003 / 0003a), not from a live re-walk
+// of db.evidenceModels + item.scoring.evidenceActivationMap. A missing,
+// inactive, or stale package is a REFUSAL, not a warning on a recorded
+// null identification -- recording that would look like "the work
+// product matched no pattern" and quietly drop the response. Calibrated
+// parameters are still Accumulation's concern and are still resolved
+// live from parameterSets[] (ADR 0003: never bake them in).
 //
 // Pure computation (no persistence), matching the style already
 // established for compositeLibrary/builder.js and
 // classicalCalibration.js: takes data in, returns data out.
-//
-// What this deliberately does NOT touch, and why: statisticalModels[] /
-// parameterSets[] (calibration is Accumulation's concern, and per ADR 0003
-// + the Day 26 migration map's recommendation, whichever step DOES read
-// calibrated parameters should read them live from parameterSets[], never
-// from a cached item-level copy). Identification only needs the Evidence
-// Model's observable + evidenceRule, never its statistical model.
+
+import { resolveIdentificationStructure } from "../compositeLibrary/activePackage.js";
 
 /**
  * True if `pattern`'s keys all match the corresponding keys on
@@ -62,23 +66,38 @@ function matchesResponsePattern(pattern, workProduct) {
   });
 }
 
+function emptyIdentification(observationId, extras = {}) {
+  return {
+    observationId,
+    observableId: null,
+    activated: null,
+    direction: null,
+    strength: null,
+    rationale: null,
+    ...extras,
+  };
+}
+
 /**
  * Identify the Observable Variable value a work product provides for one
- * Item, by matching it against the Item's evidenceActivationMap and
- * resolving the bound Evidence Model's observable + evidenceRule.
+ * Item, by matching it against the PACKAGE-BAKED evidenceActivationMap
+ * and evidenceRule (ADR 0003a).
  *
- * Degrades gracefully (returns a result carrying a `warning`, never
- * throws) for data-quality problems it can't resolve: an unknown
- * evidenceModelId, a missing observable, or a work product that matches
- * none of the item's declared response patterns -- that last case is
- * itself a real, reportable outcome (the item's evidenceActivationMap is
- * incomplete), not a crash. Only throws for programmer errors (missing
+ * Refuses (returns `{ refused: true, error }`, never throws) when there
+ * is no active package, the package is stale, or the item is not in it.
+ * The submit path turns that into a 409. Degrades gracefully (a result
+ * carrying a `warning`, not a refusal) for data-quality problems inside
+ * an otherwise usable package: a work product that matches none of the
+ * baked response patterns, or a matched entry that forgot
+ * `activatesObservable`. Only throws for programmer errors (missing
  * required arguments), matching compositeLibrary/builder.js's convention.
  *
  * @param {object} workProduct - the raw response, e.g. `{ selected: "opt_a" }`
- * @param {object} item - a full items record (needs observationId,
- *   evidenceModelId, scoring.evidenceActivationMap)
- * @param {object} db - the full db snapshot (needs .evidenceModels)
+ * @param {object} item - needs observationId and id; taskModelId is read
+ *   from the item or from `options.taskModelId`
+ * @param {object} db - the full db snapshot (needs .compositeLibrary,
+ *   .taskModels, .evidenceModels for the staleness check)
+ * @param {{ taskModelId?: string }} [options]
  * @returns {{
  *   observationId: string,
  *   observableId: string|null,
@@ -87,60 +106,46 @@ function matchesResponsePattern(pattern, workProduct) {
  *   strength: number|null,
  *   rationale: string|null,
  *   warning?: string,
+ *   refused?: boolean,
+ *   error?: string,
  * }}
  */
-export function identifyEvidence(workProduct, item, db) {
+export function identifyEvidence(workProduct, item, db, options = {}) {
   if (!item || !item.observationId) {
     throw new Error("identifyEvidence requires an item with an observationId.");
   }
   if (!db) {
-    throw new Error("identifyEvidence requires a db snapshot to resolve the bound evidenceModel.");
+    throw new Error("identifyEvidence requires a db snapshot to resolve the composite library package.");
   }
 
-  const evidenceModel = (db.evidenceModels || []).find((em) => em.id === item.evidenceModelId);
+  const resolved = resolveIdentificationStructure(item, db, options);
 
-  if (!evidenceModel) {
-    return {
-      observationId: item.observationId,
-      observableId: null,
-      activated: null,
-      direction: null,
-      strength: null,
-      rationale: null,
-      warning: `Item '${item.id}' references unknown evidenceModelId '${item.evidenceModelId}'.`,
-    };
+  if (!resolved.ok) {
+    return emptyIdentification(item.observationId, {
+      refused: true,
+      error: resolved.error,
+      warning: resolved.error,
+    });
   }
 
-  const observable = evidenceModel.observables?.find((o) => o.id === item.observationId);
+  const entry = resolved.entry;
+  const observationId = entry.observationId || item.observationId;
+  // The package entry's observationId IS the observable id in this chain
+  // (an Item's observationId must be declared on the Task Model and match
+  // an Evidence Model observable). The builder does not store a separate
+  // observableId field.
+  const observableId = observationId;
+  const evidenceRule = entry.evidenceRule || null;
+  const activationMap = entry.scoring?.evidenceActivationMap || [];
 
-  if (!observable) {
-    return {
-      observationId: item.observationId,
-      observableId: null,
-      activated: null,
-      direction: null,
-      strength: null,
-      rationale: null,
-      warning: `Evidence model '${evidenceModel.id}' has no observable '${item.observationId}'.`,
-    };
-  }
-
-  // The same dual-location fallback schema.js's own validator and
-  // compositeLibrary/builder.js both use: an evidenceRule may be embedded
-  // on the observable, or looked up from the evidence model's top-level
-  // evidenceRules[] keyed by observableId.
-  const evidenceRuleByObservableId = new Map(
-    (evidenceModel.evidenceRules || []).map((r) => [r.observableId, r])
+  const matchedEntry = activationMap.find((entryRow) =>
+    matchesResponsePattern(entryRow.responsePattern, workProduct)
   );
-  const evidenceRule = observable.evidenceRule || evidenceRuleByObservableId.get(observable.id) || null;
-
-  const activationMap = item.scoring?.evidenceActivationMap || [];
-  const matchedEntry = activationMap.find((entry) => matchesResponsePattern(entry.responsePattern, workProduct));
 
   if (!matchedEntry) {
     return {
-      observationId: item.observationId,
-      observableId: observable.id,
+      observationId,
+      observableId,
       activated: null,
       direction: evidenceRule?.direction ?? null,
       strength: null,
@@ -156,8 +161,8 @@ export function identifyEvidence(workProduct, item, db) {
   // non-activating rule). Caught by an adversarial review of this module.
   if (typeof matchedEntry.activatesObservable !== "boolean") {
     return {
-      observationId: item.observationId,
-      observableId: observable.id,
+      observationId,
+      observableId,
       activated: null,
       direction: evidenceRule?.direction ?? null,
       strength: null,
@@ -167,8 +172,8 @@ export function identifyEvidence(workProduct, item, db) {
   }
 
   return {
-    observationId: item.observationId,
-    observableId: observable.id,
+    observationId,
+    observableId,
     activated: matchedEntry.activatesObservable,
     direction: evidenceRule?.direction ?? null,
     strength: matchedEntry.strengthOverride ?? evidenceRule?.strengthLevel ?? null,

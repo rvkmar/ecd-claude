@@ -38,6 +38,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { seedActivePackages } from "../../test/seedActivePackage.js";
 
 const scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), "ecd-day35-"));
 const scratchDbFile = path.join(scratchDir, "db.json");
@@ -187,7 +188,7 @@ function makeTasks() {
 }
 
 function seedDb() {
-  return {
+  return seedActivePackages({
     sessions: [{
       id: "s-walkthrough",
       studentId: "student-1",
@@ -207,7 +208,7 @@ function seedDb() {
     items: [item],
     students: [],
     questions: [],
-  };
+  });
 }
 
 let app;
