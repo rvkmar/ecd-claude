@@ -155,3 +155,7 @@ storybook-static
 .claude
 .claude/*
 .markdownlint.json
+
+scripts-d56-playwright-finish.cjs
+scripts-d56-playwright.cjs
+seed-d56-walk.mjs
