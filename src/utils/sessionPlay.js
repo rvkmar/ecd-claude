@@ -14,7 +14,7 @@
 // none of those hit, live sessions stay visible so a student can still
 // attend (the API already returns every session to any authenticated role).
 
-import { LIVE_SESSION_STATUSES, SESSION_STATUS } from "./sessionStatus";
+import { LIVE_SESSION_STATUSES, SESSION_STATUS, normalizeSessionStatus } from "./sessionStatus";
 
 export const PLAYABLE_ROLES = Object.freeze(["student", "teacher", "district"]);
 
@@ -48,9 +48,7 @@ export function sessionAssignedToStudent(session, user, students = []) {
 }
 
 function isInProgressStatus(status) {
-  // Accept the canonical underscore spelling, and the older hyphenated
-  // one, without writing that hyphenated literal (repoGuards forbids it).
-  return String(status).replace("-", "_") === SESSION_STATUS.IN_PROGRESS;
+  return normalizeSessionStatus(status) === SESSION_STATUS.IN_PROGRESS;
 }
 
 export function isAttendableStatus(status) {
