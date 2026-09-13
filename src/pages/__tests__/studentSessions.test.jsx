@@ -92,4 +92,26 @@ describe("Student My Sessions (D50 leftover discovery)", () => {
     expect(screen.getByText(/stud1/)).toBeInTheDocument();
     expect(screen.queryByText("Play")).toBeNull();
   });
+
+  it("loads the list from /api/sessions/mine, not GET /api/sessions/:id", async () => {
+    const fetchMock = vi.fn((url) => {
+      const href = String(url);
+      expect(href).toContain("/api/sessions/mine");
+      expect(href).not.toMatch(/\/api\/sessions\/(?!mine(?:\?|$))/);
+      return jsonOk([]);
+    });
+    global.fetch = fetchMock;
+    render(
+      <MemoryRouter>
+        <StudentSessionList />
+      </MemoryRouter>
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByText(/No upcoming or in-progress sessions are available for you yet/)
+      ).toBeInTheDocument()
+    );
+    expect(screen.queryByText(/Could not load sessions/)).toBeNull();
+    expect(fetchMock).toHaveBeenCalled();
+  });
 });

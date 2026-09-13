@@ -14,7 +14,12 @@
 // none of those hit, live sessions stay visible so a student can still
 // attend (the API already returns every session to any authenticated role).
 
-import { LIVE_SESSION_STATUSES, SESSION_STATUS, normalizeSessionStatus } from "./sessionStatus";
+// Node ESM (server/index.js, Docker CMD) will not resolve a bare
+// "./sessionStatus" — Vite/Vitest will. PR #12 imported this file from
+// sessionRoutes for GET /mine; the extensionless specifier made native
+// Node fail to load the router, so /mine never registered and the
+// student list hit GET /:id ("Session not found").
+import { LIVE_SESSION_STATUSES, SESSION_STATUS, normalizeSessionStatus } from "./sessionStatus.js";
 
 export const PLAYABLE_ROLES = Object.freeze(["student", "teacher", "district"]);
 
