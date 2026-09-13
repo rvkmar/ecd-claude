@@ -6,7 +6,7 @@
 // as carefully as the accumulation math itself.
 
 import { describe, it, expect } from "vitest";
-import { resolveAssemblyProgress } from "../assemblyProgress.js";
+import { evaluateDeclaredTargets, resolveAssemblyProgress } from "../assemblyProgress.js";
 
 function posterior(overrides = {}) {
   return {
@@ -243,5 +243,104 @@ describe("resolveAssemblyProgress", () => {
       { assemblyModels: [assemblyModel()] }
     );
     expect(withoutType[0].stoppingCriterionMet).toBe(true);
+  });
+});
+
+describe("evaluateDeclaredTargets", () => {
+  function masteryPosterior(overrides = {}) {
+    return posterior({
+      method: "attribute-mastery-posterior",
+      modelFamily: "dina",
+      smvType: "binary",
+      estimate: 0.92,
+      precision: Math.sqrt(0.92 * 0.08),
+      ...overrides,
+    });
+  }
+
+  it("refuses to treat an unscored declared SMV as met (the D56/D57 gap)", () => {
+    const am = assemblyModel({
+      targetsBySMV: [
+        { smvId: "smv1", requiredClassificationAccuracy: 0.85 },
+        { smvId: "smv2", requiredClassificationAccuracy: 0.85 },
+      ],
+    });
+    const progress = resolveAssemblyProgress([masteryPosterior({ smvId: "smv1" })], { assemblyModels: [am] });
+    const result = evaluateDeclaredTargets(am, progress);
+
+    expect(progress).toHaveLength(1);
+    expect(result.declaredCount).toBe(2);
+    expect(result.scoredCount).toBe(1);
+    expect(result.metCount).toBe(1);
+    expect(result.allScoredAndMet).toBe(false);
+    expect(result.rows.find((r) => r.smvId === "smv2")).toMatchObject({ scored: false, met: false });
+  });
+
+  it("is met only when every declared target is scored and stoppingCriterionMet", () => {
+    const am = assemblyModel({
+      targetsBySMV: [
+        { smvId: "smv1", requiredClassificationAccuracy: 0.85 },
+        { smvId: "smv2", requiredClassificationAccuracy: 0.85 },
+      ],
+    });
+    const progress = resolveAssemblyProgress(
+      [masteryPosterior({ smvId: "smv1" }), masteryPosterior({ smvId: "smv2" })],
+      { assemblyModels: [am] }
+    );
+
+    expect(evaluateDeclaredTargets(am, progress)).toMatchObject({
+      declaredCount: 2,
+      scoredCount: 2,
+      metCount: 2,
+      allScoredAndMet: true,
+    });
+  });
+
+  it("does not stop when both declared targets are scored and one is unmet", () => {
+    const am = assemblyModel({
+      targetsBySMV: [
+        { smvId: "smv1", requiredClassificationAccuracy: 0.85 },
+        { smvId: "smv2", requiredClassificationAccuracy: 0.85 },
+      ],
+    });
+    const progress = resolveAssemblyProgress(
+      [masteryPosterior({ smvId: "smv1" }), masteryPosterior({ smvId: "smv2", estimate: 0.7 })],
+      { assemblyModels: [am] }
+    );
+    const result = evaluateDeclaredTargets(am, progress);
+
+    expect(result.scoredCount).toBe(2);
+    expect(result.metCount).toBe(1);
+    expect(result.allScoredAndMet).toBe(false);
+    expect(result.rows.find((r) => r.smvId === "smv2").met).toBe(false);
+  });
+
+  it("keeps a single continuous SEM target that is met as a stop", () => {
+    const am = assemblyModel();
+    const progress = resolveAssemblyProgress([posterior({ precision: 0.3 })], { assemblyModels: [am] });
+
+    expect(evaluateDeclaredTargets(am, progress)).toMatchObject({
+      declaredCount: 1,
+      scoredCount: 1,
+      metCount: 1,
+      allScoredAndMet: true,
+    });
+  });
+
+  it("zero declared targets is not all-met", () => {
+    expect(evaluateDeclaredTargets(assemblyModel({ targetsBySMV: [] }), []).allScoredAndMet).toBe(false);
+    expect(evaluateDeclaredTargets(assemblyModel({ targetsBySMV: undefined }), []).allScoredAndMet).toBe(false);
+  });
+
+  it("does not count a progress row from a different Assembly Model as scored", () => {
+    const am = assemblyModel({ id: "am-governing" });
+    const result = evaluateDeclaredTargets(am, [{
+      smvId: "smv1",
+      assemblyModelId: "am-other",
+      stoppingCriterionMet: true,
+    }]);
+
+    expect(result.scoredCount).toBe(0);
+    expect(result.allScoredAndMet).toBe(false);
   });
 });

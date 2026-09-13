@@ -850,7 +850,7 @@ describe("stopping rules", () => {
     });
   }
 
-  it("targetsMet stops once every reported target is met", () => {
+  it("targetsMet stops once every declared target is scored and met", () => {
     const db = irtDb({
       assemblyModels: [
         assemblyModel({
@@ -864,6 +864,7 @@ describe("stopping rules", () => {
 
     expect(result.stopped).toMatchObject({ rule: "targetsMet", assemblyModelId: "am1" });
     expect(result.stopped.targets[0].smvId).toBe("smv-theta");
+    expect(result.stopped.reason).toMatch(/Every declared Assembly Model target is scored and met \(1 of 1\)/);
   });
 
   /* Day 57's end-to-end clause: a DIAGNOSTIC session, driven through the
@@ -953,6 +954,81 @@ describe("stopping rules", () => {
       expect(target).not.toHaveProperty("classification");
       expect(target).not.toHaveProperty("requiredClassificationAccuracy");
       expect(target).not.toHaveProperty("expectedClassificationAccuracy");
+    });
+
+    /* The live D56/D57 walk that produced "1 of 1" / "Measurement target
+       met" after only attrA was scored: an Assembly Model that declared
+       BOTH attributes, plus stoppingRules.targetsMet, used to stop as soon
+       as the reported slice was met. Multi-attribute diagnostics must
+       refuse that. */
+    function twoAttributeAm(attrAAccuracy, attrBAccuracy) {
+      return dinaDb({
+        assemblyModels: [
+          assemblyModel({
+            targetsBySMV: [
+              { smvId: "attrA", requiredClassificationAccuracy: attrAAccuracy },
+              { smvId: "attrB", requiredClassificationAccuracy: attrBAccuracy },
+            ],
+            stoppingRules: { targetsMet: true, minItems: 1 },
+          }),
+        ],
+      });
+    }
+
+    function diagnosticResponse(taskId, itemId, observableId) {
+      return {
+        taskId,
+        itemId,
+        evidenceModelId: "emD",
+        evidenceModelVersion: 1,
+        observableId,
+        parameterSource: "pilot",
+        pilotParams: { slip: 0.1, guess: 0.2 },
+        activated: true,
+        direction: "supports",
+        strength: 4,
+      };
+    }
+
+    it("does NOT stop when only one of two declared classification targets has a posterior", () => {
+      // Same evidence as the single-attribute D57 stop: attrA is master @
+      // ~0.818. attrB was never touched, so it must not count as "1 of 1".
+      const result = selectNextActivity(diagnosticSession(), twoAttributeAm(0.8, 0.8));
+
+      expect(result.stopped).toBeUndefined();
+      expect(result.taskId).toBe("tB");
+    });
+
+    it("stops once every declared classification target is scored and met", () => {
+      const s = diagnosticSession({
+        responses: [
+          diagnosticResponse("tA", "itemA", "oA"),
+          diagnosticResponse("tB", "itemB", "oB"),
+        ],
+      });
+
+      const result = selectNextActivity(s, twoAttributeAm(0.8, 0.8));
+
+      expect(result.taskId).toBeUndefined();
+      expect(result.stopped.rule).toBe("targetsMet");
+      expect(result.stopped.reason).toMatch(/Every declared Assembly Model target is scored and met \(2 of 2\)/);
+      expect(result.stopped.targets.map((t) => t.smvId)).toEqual(["attrA", "attrB"]);
+      expect(result.stopped.targets.every((t) => t.classification === "master")).toBe(true);
+    });
+
+    it("does NOT stop when both declared targets are scored and one is still unmet", () => {
+      // Both attributes have a real posterior; attrB's 0.818... is short
+      // of 0.95, so the session continues rather than stopping on attrA.
+      const s = diagnosticSession({
+        responses: [
+          diagnosticResponse("tA", "itemA", "oA"),
+          diagnosticResponse("tB", "itemB", "oB"),
+        ],
+      });
+
+      const result = selectNextActivity(s, twoAttributeAm(0.8, 0.95));
+
+      expect(result.stopped).toBeUndefined();
     });
   });
 

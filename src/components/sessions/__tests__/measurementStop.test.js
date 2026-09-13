@@ -7,6 +7,15 @@ describe("measurementStop copy", () => {
     expect(measurementStopHeading({ rule: "maxItems" })).toBe("Item limit reached");
   });
 
+  it("uses the plural when more than one declared target was met", () => {
+    expect(
+      measurementStopHeading({
+        rule: "targetsMet",
+        targets: [{ smvId: "attrA", classification: "master" }, { smvId: "attrB", classification: "master" }],
+      })
+    ).toBe("Measurement targets met");
+  });
+
   it("lists classification targets that the player can render", () => {
     const details = measurementStopDetails({
       targets: [

@@ -67,7 +67,7 @@ export default function Step3StoppingRules() {
           onCheckedChange={(v) => patchStoppingRules({ targetsMet: Boolean(v) })}
         />
         <span className="text-sm text-slate-700">
-          Stop once every declared SMV target (Step 2) has been met
+          Stop once every declared SMV target (Step 2) has been scored and met
         </span>
       </label>
 
