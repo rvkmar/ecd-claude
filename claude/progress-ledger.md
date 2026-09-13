@@ -1,6 +1,18 @@
 # ECD progress ledger
 
-Restored 2026-09-13 at D58 close. The file was missing from the repo; this reconstruction is from `git log`, `CHANGELOG.md`, and the day handoffs that *are* in `claude/`. Pre-D50 day files for D51–D57 were cited in the changelog and are still absent from `claude/` — git is the authority for those units.
+Restored 2026-09-13 at D58 close from `git log`, `CHANGELOG.md`, and the day handoffs then in `claude/`. D51–D57 contemporaneous notes were cited (CHANGELOG / commit messages) but never committed; they were reconstructed into `claude/` on 2026-09-13 from those same sources. Git remains the authority for what those units shipped.
+
+Restored D51–D57 notes (each marked “Restored 2026-09-13”):
+
+- `claude/day51-w11-calibration-and-qmatrix-editor.md`
+- `claude/day52-w11-live-browser-walkthrough.md`
+- `claude/day52b-qmatrix-route-decision.md`
+- `claude/day52c-qmatrix-item-row-premise.md`
+- `claude/day53-w11-dina-gdina-authoring.md`
+- `claude/day54-assembly-model-wizard.md`
+- `claude/day55-w11-accessibility-audit-not-run.md` (honest skip; no audit invented)
+- `claude/day56-w12-activity-selection.md`
+- `claude/day57-classification-accuracy-stopping.md`
 
 ## Current position
 
@@ -20,6 +32,7 @@ Restored 2026-09-13 at D58 close. The file was missing from the repo; this recon
 |---|---|---|---|
 | 2026-09-13 | D58 | 2, alone | Premise rewritten: no new orchestrator. Persist `session.stopped`; player reads `data.stopped`. Live player walk later the same day: `s1789288381307` showed "Measurement target met" / attrA master 0.95. |
 | 2026-09-13 | D59 | 2, alone | Closed examinee leak on `teacher-report`. Role-split `SessionReport` / `reportsRoutes`. Classification + stop on report header, learner/teacher tabs, session list badge, session-player header. D60 not started. |
+| 2026-09-13 | docs | — | Restored missing D51–D57 handoffs under `claude/` (see file list in that PR). No product code. D55 remains the skipped WCAG audit. |
 
 ## Compression debt
 
