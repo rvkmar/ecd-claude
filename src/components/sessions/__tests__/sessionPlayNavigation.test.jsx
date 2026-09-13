@@ -33,16 +33,20 @@ function fakeJwt(payload) {
   return `${base64url({ alg: "HS256", typ: "JWT" })}.${base64url(payload)}.fakesignature`;
 }
 
-function seedTeacherAuth() {
+function seedRoleAuth(username, role) {
   const token = fakeJwt({
-    username: "teach1",
-    role: "teacher",
+    username,
+    role,
     exp: Math.floor(Date.now() / 1000) + 3600,
   });
   sessionStorage.setItem(
     STORAGE_KEY,
-    JSON.stringify({ username: "teach1", role: "teacher", token })
+    JSON.stringify({ username, role, token })
   );
+}
+
+function seedTeacherAuth() {
+  seedRoleAuth("teach1", "teacher");
 }
 
 function LocationProbe() {
@@ -59,9 +63,34 @@ function jsonOk(body) {
   });
 }
 
+function mockSessionApis(live) {
+  global.fetch = vi.fn((url, options = {}) => {
+    const href = String(url);
+    const method = (options.method || "GET").toUpperCase();
+    if (href.includes("/api/sessions/") && href.endsWith("/play") && method === "POST") {
+      const updated = { ...live[0], status: "in_progress" };
+      live[0] = updated;
+      return jsonOk(updated);
+    }
+    if (href.includes("/api/sessions/") && href.endsWith("/pause") && method === "POST") {
+      const updated = { ...live[0], status: "paused" };
+      live[0] = updated;
+      return jsonOk(updated);
+    }
+    if (href.includes("/api/sessions/archived")) return jsonOk([]);
+    if (href.includes("/api/sessions")) return jsonOk(live);
+    if (href.includes("/api/students/assignable")) {
+      return jsonOk({ students: [{ id: "stu1", name: "Pat" }], cohorts: [] });
+    }
+    if (href.includes("/api/students")) return jsonOk([{ id: "stu1", name: "Pat" }]);
+    if (href.includes("/api/tasks")) return jsonOk([]);
+    return jsonOk([]);
+  });
+}
+
 beforeEach(() => {
   sessionStorage.clear();
-  const live = [
+  mockSessionApis([
     {
       id: "s1788",
       studentId: "stu1",
@@ -69,15 +98,7 @@ beforeEach(() => {
       taskIds: ["t1"],
       responses: [],
     },
-  ];
-  global.fetch = vi.fn((url) => {
-    const href = String(url);
-    if (href.includes("/api/sessions/archived")) return jsonOk([]);
-    if (href.includes("/api/sessions")) return jsonOk(live);
-    if (href.includes("/api/students")) return jsonOk([{ id: "stu1", name: "Pat" }]);
-    if (href.includes("/api/tasks")) return jsonOk([]);
-    return jsonOk([]);
-  });
+  ]);
 });
 
 describe("Staff Play navigation (D50 leftover)", () => {
@@ -87,7 +108,7 @@ describe("Staff Play navigation (D50 leftover)", () => {
     expect(src).toMatch(/sessionPlayerPath/);
   });
 
-  it("Play opens the teacher player without bouncing to /login or clearing auth", async () => {
+  it("Operate opens the teacher player without bouncing to /login or clearing auth", async () => {
     seedTeacherAuth();
     render(
       <MemoryRouter initialEntries={["/teacher"]}>
@@ -107,8 +128,9 @@ describe("Staff Play navigation (D50 leftover)", () => {
       </MemoryRouter>
     );
 
-    await waitFor(() => expect(screen.getByText("Play")).toBeInTheDocument());
-    await userEvent.click(screen.getByText("Play"));
+    await waitFor(() => expect(screen.getByText("Operate")).toBeInTheDocument());
+    expect(screen.queryByText("Play")).toBeNull();
+    await userEvent.click(screen.getByText("Operate"));
 
     await waitFor(() => {
       expect(screen.getByText("Teacher player loaded")).toBeInTheDocument();
@@ -116,6 +138,76 @@ describe("Staff Play navigation (D50 leftover)", () => {
     expect(screen.queryByText("Login page")).toBeNull();
     expect(screen.getByTestId("location")).toHaveTextContent("/teacher/sessions/s1788/player");
     expect(sessionStorage.getItem(STORAGE_KEY)).toBeTruthy();
+  });
+
+  it("district Operate uses the same list → player path as teacher", async () => {
+    seedRoleAuth("dist1", "district");
+    render(
+      <MemoryRouter initialEntries={["/district"]}>
+        <AuthProvider>
+          <LocationProbe />
+          <Routes>
+            <Route path="/login" element={<div>Login page</div>} />
+            <Route path="/district" element={<SessionBuilder />} />
+            <Route
+              path="/district/sessions/:sessionId/player"
+              element={<div>District player loaded</div>}
+            />
+            <Route path="*" element={<Navigate to="/login" replace />} />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => expect(screen.getByText("Operate")).toBeInTheDocument());
+    expect(screen.queryByText("Play")).toBeNull();
+    await userEvent.click(screen.getByText("Operate"));
+    await waitFor(() => {
+      expect(screen.getByText("District player loaded")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("location")).toHaveTextContent("/district/sessions/s1788/player");
+  });
+
+  it("Play persists in_progress and stays on the list (Pause + Operate, no player)", async () => {
+    mockSessionApis([
+      {
+        id: "s1788",
+        studentId: "stu1",
+        status: "ready",
+        taskIds: ["t1"],
+        responses: [],
+      },
+    ]);
+    seedTeacherAuth();
+    render(
+      <MemoryRouter initialEntries={["/teacher"]}>
+        <AuthProvider>
+          <LocationProbe />
+          <Routes>
+            <Route path="/login" element={<div>Login page</div>} />
+            <Route path="/teacher" element={<SessionBuilder />} />
+            <Route
+              path="/teacher/sessions/:sessionId/player"
+              element={<div>Teacher player loaded</div>}
+            />
+            <Route path="*" element={<Navigate to="/login" replace />} />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => expect(screen.getByText("Play")).toBeInTheDocument());
+    expect(screen.queryByText("Pause")).toBeNull();
+    await userEvent.click(screen.getByText("Play"));
+
+    await waitFor(() => expect(screen.getByText("Pause")).toBeInTheDocument());
+    expect(screen.getByText("Operate")).toBeInTheDocument();
+    expect(screen.queryByText("Play")).toBeNull();
+    expect(screen.queryByText("Teacher player loaded")).toBeNull();
+    expect(screen.getByTestId("location")).toHaveTextContent("/teacher");
+    expect(global.fetch.mock.calls.some(([url, opts]) =>
+      String(url).includes("/play") && (opts?.method || "").toUpperCase() === "POST"
+    )).toBe(true);
   });
 
   it("the legacy /sessions/:id/player URL forwards to the role player, not login", async () => {

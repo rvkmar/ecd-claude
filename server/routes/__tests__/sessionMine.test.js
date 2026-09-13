@@ -56,6 +56,85 @@ describe("GET /api/sessions/mine", () => {
     expect(res.body).toEqual([]);
     expect(res.body).not.toEqual(expect.objectContaining({ error: "Session not found" }));
   });
+
+  it("matches a session assigned by typed username in studentIds", async () => {
+    loadDB.mockReturnValue({
+      students: [],
+      sessions: [
+        {
+          id: "s-typed",
+          studentId: "stud1",
+          studentIds: ["stud1"],
+          status: "ready",
+          taskIds: ["t1"],
+        },
+      ],
+    });
+    const res = await request(app).get("/api/sessions/mine");
+    expect(res.status).toBe(200);
+    expect(res.body.map((s) => s.id)).toEqual(["s-typed"]);
+  });
+});
+
+describe("GET /api/sessions/:id never 404s reserved collection names", () => {
+  it("returns [] for id=mine instead of Session not found", async () => {
+    loadDB.mockReturnValue({ sessions: [] });
+    const res = await request(app).get("/api/sessions/mine");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+    expect(JSON.stringify(res.body)).not.toMatch(/Session not found/);
+  });
+});
+
+describe("POST /api/sessions/:id/play", () => {
+  it("persists ready → in_progress", async () => {
+    const session = { id: "s-ready", status: "ready", studentId: "stud1", taskIds: ["t1"] };
+    const db = { sessions: [session], policies: [{ id: "p1", type: "fixed" }] };
+    loadDB.mockReturnValue(db);
+    const res = await request(app).post("/api/sessions/s-ready/play");
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("in_progress");
+    expect(db.sessions[0].status).toBe("in_progress");
+  });
+});
+
+describe("POST /api/sessions assignment", () => {
+  function dbWithPolicy() {
+    return {
+      sessions: [],
+      students: [
+        { id: "stu1", name: "Pat", classId: "6A" },
+        { id: "stu2", name: "Sam", classId: "6A" },
+      ],
+      tasks: [{ id: "t1" }],
+      policies: [{ id: "p-fixed", type: "fixed" }],
+    };
+  }
+
+  it("creates one ready session per cohort member so /mine can find them", async () => {
+    const db = dbWithPolicy();
+    loadDB.mockReturnValue(db);
+    const res = await request(app)
+      .post("/api/sessions")
+      .send({ taskIds: ["t1"], cohortId: "6A", selectionStrategy: "fixed" });
+    expect(res.status).toBe(201);
+    expect(res.body.sessions).toHaveLength(2);
+    expect(res.body.sessions.every((s) => s.status === "ready")).toBe(true);
+    expect(res.body.sessions.map((s) => s.studentId).sort()).toEqual(["stu1", "stu2"]);
+    expect(db.sessions).toHaveLength(2);
+  });
+
+  it("accepts a typed student ID when the students collection is empty", async () => {
+    const db = { sessions: [], students: [], tasks: [{ id: "t1" }], policies: [{ id: "p-fixed", type: "fixed" }] };
+    loadDB.mockReturnValue(db);
+    const res = await request(app)
+      .post("/api/sessions")
+      .send({ taskIds: ["t1"], studentId: "stud1", selectionStrategy: "fixed" });
+    expect(res.status).toBe(201);
+    expect(res.body.studentId).toBe("stud1");
+    expect(res.body.studentIds).toEqual(["stud1"]);
+    expect(res.body.status).toBe("ready");
+  });
 });
 
 describe("GET /api/sessions/mine is loadable by native Node ESM", () => {

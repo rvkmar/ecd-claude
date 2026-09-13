@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/select"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
+const EMPTY_MODEL = {};
 
 // SessionForm.jsx
 // Props:
@@ -22,8 +23,16 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 // - onCancel()
 // - notify(message)
 
-export default function SessionForm({ model = {}, students = [], tasks = [], onSave = () => {}, onCancel = () => {}, notify = () => {} }) {
+export default function SessionForm({ model = EMPTY_MODEL, students = [], cohorts = [], tasks = [], onSave = () => {}, onCancel = () => {}, notify = () => {} }) {
   const [studentId, setStudentId] = useState(model.studentId || "");
+  const [selectedStudentIds, setSelectedStudentIds] = useState(
+    model.studentIds || (model.studentId ? [model.studentId] : [])
+  );
+  const [studentIdInput, setStudentIdInput] = useState("");
+  const [cohortId, setCohortId] = useState(model.cohortId || "");
+  const [assignmentMode, setAssignmentMode] = useState(
+    model.cohortId || (model.studentIds && model.studentIds.length > 1) ? "cohort" : "students"
+  );
   const [selectedTasks, setSelectedTasks] = useState(model.taskIds || []);
   const [selectionStrategy, setSelectionStrategy] = useState(model.selectionStrategy || "fixed");
   // Policy list now comes from the shared usePolicies() cache (see
@@ -73,10 +82,30 @@ export default function SessionForm({ model = {}, students = [], tasks = [], onS
   
   useEffect(() => {
     setStudentId(model.studentId || "");
+    setSelectedStudentIds(model.studentIds || (model.studentId ? [model.studentId] : []));
+    setCohortId(model.cohortId || "");
+    setStudentIdInput("");
     setSelectedTasks(model.taskIds || []);
     setSelectionStrategy(model.selectionStrategy || "fixed");
     setPolicyId(model.nextTaskPolicy?.policyId || "");
   }, [model]);
+
+  const toggleStudent = (id) => {
+    setSelectedStudentIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+    setStudentId(id);
+  };
+
+  const addStudentById = () => {
+    const raw = studentIdInput.trim();
+    if (!raw) return notify("Enter a student ID or username");
+    if (!selectedStudentIds.includes(raw)) {
+      setSelectedStudentIds((prev) => [...prev, raw]);
+    }
+    setStudentId(raw);
+    setStudentIdInput("");
+  };
 
   const toggleTask = (taskId) => {
     if (selectedTasks.includes(taskId)) {
@@ -104,12 +133,21 @@ export default function SessionForm({ model = {}, students = [], tasks = [], onS
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!studentId) return notify("Please select a student");
+    const assignees = [...selectedStudentIds];
+    if (studentId && !assignees.includes(studentId)) assignees.push(studentId);
+    if (assignmentMode !== "cohort" && assignees.length === 0) {
+      return notify("Please select a student or enter a student ID");
+    }
+    if (assignmentMode === "cohort" && !cohortId && assignees.length === 0) {
+      return notify("Please select a cohort or add at least one student");
+    }
     if (!Array.isArray(selectedTasks) || selectedTasks.length === 0) return notify("Please select at least one activity");
 
     const payload = {
       id: model.id,
-      studentId,
+      studentId: assignees[0] || "",
+      studentIds: assignees,
+      cohortId: assignmentMode === "cohort" ? cohortId : "",
       taskIds: selectedTasks,
       selectionStrategy,
       nextTaskPolicy: policyId ? { policyId } : {},
@@ -139,13 +177,103 @@ export default function SessionForm({ model = {}, students = [], tasks = [], onS
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
-        <label className="block font-medium">Student</label>
-        <select value={studentId} onChange={(e) => setStudentId(e.target.value)} className="border p-2 rounded w-full">
-          <option value="">Select student</option>
-          {students.map((s) => (
-            <option key={s.id} value={s.id}>{s.name || s.id}</option>
-          ))}
-        </select>
+        <label className="block font-medium">Assign to</label>
+        <div className="flex gap-4 text-sm mt-1 mb-2">
+          <label className="inline-flex items-center gap-1">
+            <input
+              type="radio"
+              name="assignmentMode"
+              value="students"
+              checked={assignmentMode === "students"}
+              onChange={() => setAssignmentMode("students")}
+            />
+            Students
+          </label>
+          <label className="inline-flex items-center gap-1">
+            <input
+              type="radio"
+              name="assignmentMode"
+              value="cohort"
+              checked={assignmentMode === "cohort"}
+              onChange={() => setAssignmentMode("cohort")}
+            />
+            Cohort
+          </label>
+        </div>
+
+        {assignmentMode === "cohort" && (
+          <select
+            value={cohortId}
+            onChange={(e) => setCohortId(e.target.value)}
+            className="border p-2 rounded w-full mb-2"
+            data-testid="cohort-select"
+          >
+            <option value="">Select cohort</option>
+            {cohorts.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name || c.id} ({(c.studentIds || []).length} students)
+              </option>
+            ))}
+            {cohorts.length === 0 && (
+              <option value="" disabled>
+                No class cohorts yet — add students with a class, or use IDs below
+              </option>
+            )}
+          </select>
+        )}
+
+        <div className="max-h-40 overflow-auto border rounded p-2 bg-white" data-testid="student-picker">
+          {students.length === 0 && (
+            <p className="text-sm text-gray-500 mb-2">
+              No roster yet. Enter a student ID or username (for example stud1).
+            </p>
+          )}
+          {students.map((s) => {
+            const label = s.name || s.username || s.id;
+            const checked = selectedStudentIds.includes(s.id) || selectedStudentIds.includes(s.username);
+            return (
+              <label key={s.id} className="block text-sm py-0.5">
+                <input
+                  type="checkbox"
+                  checked={!!checked}
+                  onChange={() => toggleStudent(s.id)}
+                />{" "}
+                {label}
+                {s.username && s.username !== label ? ` (${s.username})` : ""}
+                {s.classId ? ` · class ${s.classId}` : ""}
+              </label>
+            );
+          })}
+        </div>
+
+        <div className="flex gap-2 mt-2">
+          <input
+            type="text"
+            value={studentIdInput}
+            onChange={(e) => setStudentIdInput(e.target.value)}
+            placeholder="Student with ID / username"
+            className="border p-2 rounded flex-1"
+            data-testid="student-id-input"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addStudentById();
+              }
+            }}
+          />
+          <button
+            type="button"
+            onClick={addStudentById}
+            className="px-3 py-2 border rounded bg-white hover:bg-gray-50"
+          >
+            Add ID
+          </button>
+        </div>
+        {selectedStudentIds.length > 0 && (
+          <p className="text-xs text-gray-600 mt-1" data-testid="selected-assignees">
+            Assigned: {selectedStudentIds.join(", ")}
+          </p>
+        )}
       </div>
 
       <div>

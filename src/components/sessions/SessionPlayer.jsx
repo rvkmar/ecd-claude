@@ -6,7 +6,7 @@ import { usePolicies } from "../../api/queries/policies";
 import { useAuth } from "../../auth/AuthProvider";
 import { apiFetch, apiErrorMessage } from "../../api/apiClient";
 import { SESSION_STATUS } from "../../utils/sessionStatus";
-import { canPauseSession } from "../../utils/sessionPlay";
+import { canPauseSession, sessionListPath } from "../../utils/sessionPlay";
 import { measurementStopHeading, measurementStopDetails } from "./measurementStop";
 
 import { useNavigate, useParams } from "react-router-dom";
@@ -812,6 +812,18 @@ export default function SessionPlayer({
           )}
         </div>
         <div className="flex items-center space-x-2">
+          <button
+            type="button"
+            onClick={() => {
+              const listPath = sessionListPath(auth?.role);
+              if (listPath) navigate(listPath);
+              else navigate(-1);
+            }}
+            className="bg-gray-200 text-gray-800 px-3 py-1 rounded hover:bg-gray-300"
+            data-testid="session-player-back"
+          >
+            Back to sessions
+          </button>
           {canPauseSession(session, { reviewMode: isTeacher }) && (
             <button
               type="button"

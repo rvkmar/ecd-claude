@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import Modal from "../ui/Modal";
 import { measurementStopHeading } from "./measurementStop";
-import { canPauseSession } from "@/utils/sessionPlay";
+import { canPauseSession, canPlaySession, canOperateSession } from "@/utils/sessionPlay";
 
 // SessionList.jsx
 // Presentational list for sessions. Receives `sessions` and optional `students`.
@@ -20,6 +20,7 @@ export default function SessionList({
   policies = [],
   onPlay = () => {},
   onPause = () => {},
+  onOperate = () => {},
   onResume = () => {},
   onDelete = () => { },
   onArchive = () => {}, 
@@ -29,8 +30,18 @@ export default function SessionList({
   const [expanded, setExpanded] = useState(null); // track which session preview is expanded
 
   const getStudentName = (id) => {
-    const s = (students || []).find((st) => st.id === id);
-    return s ? s.name : id || "(unassigned)";
+    const s = (students || []).find((st) => st.id === id || st.username === id);
+    return s ? (s.name || s.username || s.id) : id || "(unassigned)";
+  };
+
+  const getAssigneeLabel = (session) => {
+    const ids = [
+      session.studentId,
+      ...(session.studentIds || []),
+    ].filter(Boolean);
+    const unique = [...new Set(ids.map(String))];
+    if (unique.length === 0) return "(unassigned)";
+    return unique.map(getStudentName).join(", ");
   };
 
   const getPolicyName = (policyId) => {
@@ -121,11 +132,13 @@ export default function SessionList({
                       ? "bg-yellow-100 text-yellow-800"
                       : s.status === "submitted" || s.isCompleted
                       ? "bg-blue-100 text-blue-800"
-                      : s.status === "paused"
-                      ? "bg-orange-100 text-orange-800"
-                      : s.status === "archived"
-                      ? "bg-gray-300 text-gray-700"
-                      : "bg-yellow-100 text-yellow-800"
+                    : s.status === "paused"
+                    ? "bg-orange-100 text-orange-800"
+                    : s.status === "ready"
+                    ? "bg-slate-100 text-slate-800"
+                    : s.status === "archived"
+                    ? "bg-gray-300 text-gray-700"
+                    : "bg-yellow-100 text-yellow-800"
                   }`}
                 >
                   {s.status === "reviewed"
@@ -136,6 +149,8 @@ export default function SessionList({
                     ? "Submitted"
                     : s.status === "paused"
                     ? "Paused"
+                    : s.status === "ready"
+                    ? "Ready"
                     : s.status === "archived"
                     ? "Archived"
                     : "In Progress"}
@@ -145,7 +160,10 @@ export default function SessionList({
 
             <div className="text-sm text-gray-600 mt-1">
               <div>
-                Student: <strong>{getStudentName(s.studentId)}</strong>
+                Student: <strong>{getAssigneeLabel(s)}</strong>
+                {s.cohortId && (
+                  <span className="ml-2 text-xs text-gray-500">(Cohort: {s.cohortId})</span>
+                )}
               </div>
               <div>
                 Strategy: <strong>{s.selectionStrategy || "fixed"}</strong>
@@ -173,30 +191,31 @@ export default function SessionList({
           </div>
 
           <div className="flex flex-col space-y-2 w-1/4 items-end">
-            {canPauseSession(s) && (
-              <>
-                <button
-                  onClick={() => onPlay(s)}
-                  className="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600"
-                >
-                  Play
-                </button>
-                <button
-                  onClick={() => onPause(s.id)}
-                  className="bg-orange-500 text-white px-3 py-1 rounded hover:bg-orange-600"
-                >
-                  Pause
-                </button>
-              </>
-            )}
-
-            {/* Allow Resume for paused sessions */}
-            {s.status === "paused" && (
+            {canPlaySession(s) && (
               <button
-                onClick={() => onResume(s.id)}
-                className="bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600"
+                type="button"
+                onClick={() => onPlay(s)}
+                className="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600"
               >
-                Resume
+                Play
+              </button>
+            )}
+            {canPauseSession(s) && (
+              <button
+                type="button"
+                onClick={() => onPause(s.id)}
+                className="bg-orange-500 text-white px-3 py-1 rounded hover:bg-orange-600"
+              >
+                Pause
+              </button>
+            )}
+            {canOperateSession(s) && (
+              <button
+                type="button"
+                onClick={() => onOperate(s)}
+                className="bg-indigo-500 text-white px-3 py-1 rounded hover:bg-indigo-600"
+              >
+                Operate
               </button>
             )}
 

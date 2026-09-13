@@ -18,7 +18,7 @@ Restored D51–D57 notes (each marked “Restored 2026-09-13”):
 
 | | |
 |---|---|
-| Last completed unit | **D59** — role-split reports / attribute profile / examinee leak. This branch also closes D50 leftover staff Play + student discovery (`claude/day60-staff-play-and-student-discovery.md`); that file is not the never-compress D60. |
+| Last completed unit | **D59** — role-split reports / attribute profile / examinee leak. D50 leftover staff Play routing closed in #12/#13 (`day60-…`). This branch closes the remaining staff Play/Pause/Operate + assignment + /mine leftover (`claude/day61-staff-session-operate-and-assignment.md`); that file is not the never-compress D60. |
 | Next queued | **D60** — never-compress adversarial review of selection/stopping (own session) |
 | Block | W12 — Activity Selection, stopping, reporting |
 | Block gate | Sessions end on an accuracy target, not only on length; attribute-profile report renders |
@@ -34,6 +34,7 @@ Restored D51–D57 notes (each marked “Restored 2026-09-13”):
 | 2026-09-13 | D59 | 2, alone | Closed examinee leak on `teacher-report`. Role-split `SessionReport` / `reportsRoutes`. Classification + stop on report header, learner/teacher tabs, session list badge, session-player header. D60 not started. |
 | 2026-09-13 | docs | — | Restored missing D51–D57 handoffs under `claude/` (see file list in that PR). No product code. D55 remains the skipped WCAG audit. |
 | 2026-09-13 | D50 leftover | 2 | Staff Play no longer bounces to `/login`; Pause on the player; student My Sessions lists attendable sessions (`GET /api/sessions/mine`). Handoff: `day60-staff-play-and-student-discovery.md` (not the never-compress D60). |
+| 2026-09-13 | D50 leftover | 2 | Staff list Play/Pause persist (exclusive) + Operate/Back; student/cohort assignment; /mine never 404s as "Session not found". Handoff: `day61-staff-session-operate-and-assignment.md`. |
 
 ## Compression debt
 

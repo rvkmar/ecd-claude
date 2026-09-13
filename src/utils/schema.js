@@ -466,6 +466,11 @@ export const schema = {
   sessions: {
     id: 'string',
     studentId: 'string',
+    // Group assignment: every assignee is also listed here so /mine can
+    // match a typed username (stud1) or a students-collection id (stu…).
+    studentIds: 'array',
+    assignmentGroupId: 'string',
+    cohortId: 'string',
     taskIds: 'array',
     currentTaskIndex: 'number',
     responses: [],

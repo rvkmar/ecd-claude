@@ -3,6 +3,8 @@ import express from "express";
 import { authenticateToken, authorizeRole } from "../utils/authMiddleware.js";
 import { loadDB, saveDB } from "../../src/utils/db-server.js";
 import { validateEntity } from "../../src/utils/schema.js";
+import { buildAssignableRoster } from "../../src/utils/sessionPlay.js";
+import { dbAdapter } from "../utils/dbAdapter.js";
 
 const router = express.Router();
 
@@ -24,10 +26,34 @@ router.get("/", (req, res) => {
   res.json(db.students || []);
 });
 
+// GET /api/students/assignable
+// Teacher/district session create: the `students` collection is often empty
+// (admin-only writes, never seeded) while examinees live in `users` (stud1).
+// Must be registered before /:id so "assignable" is not "Student not found".
+router.get("/assignable", async (req, res) => {
+  try {
+    const db = loadDB();
+    let users = db.users || [];
+    try {
+      const fromAdapter = await dbAdapter.list("users");
+      if (Array.isArray(fromAdapter) && fromAdapter.length) users = fromAdapter;
+    } catch {
+      // JSON-only / test environments may not have the users adapter.
+    }
+    res.json(buildAssignableRoster(db.students || [], users));
+  } catch (err) {
+    console.error("GET /api/students/assignable failed:", err);
+    res.json({ students: [], cohorts: [] });
+  }
+});
+
 // GET /api/students/:id
 router.get("/:id", (req, res) => {
+  if (req.params.id === "assignable") {
+    return res.json({ students: [], cohorts: [] });
+  }
   const db = loadDB();
-  const student = db.students.find((s) => s.id === req.params.id);
+  const student = (db.students || []).find((s) => s.id === req.params.id);
   if (!student) return res.status(404).json({ error: "Student not found" });
   res.json(student);
 });
