@@ -11,12 +11,9 @@
 // route file, a rolePermissions entry or a query hook. Same gap as
 // qMatrixModels and compositeLibrary -- validated but unreachable.
 //
-// NOTE ON A HALF-LIVE FIELD: `requiredClassificationAccuracy` is
-// surfaced by delivery/assemblyProgress.js but nothing evaluates it --
-// no decision rule turns a diagnostic posterior into a discrete mastery
-// classification until D57. This router stores and serves the target
-// faithfully; it does not pretend the target is enforced. The authoring
-// UI (D54) is required to say so on the targets step.
+// D57 evaluates requiredClassificationAccuracy (ADR 0004); D58 persists
+// the stop on the session and shows it in the player. This router still
+// only stores and serves the authored target.
 // ------------------------------------------------------------------
 import express from "express";
 import { authenticateToken, authorizeRole } from "../utils/authMiddleware.js";

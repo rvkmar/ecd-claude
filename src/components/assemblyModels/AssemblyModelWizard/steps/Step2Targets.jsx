@@ -7,12 +7,10 @@
 // generic "pick a number" field, so the wizard can never produce a
 // shape the server would reject on this axis.
 //
-// requiredClassificationAccuracy carries an explicit note that it is
-// stored and served but not yet EVALUATED anywhere (no decision rule
-// turns a posterior into a discrete classification until D57) -- see
-// assemblyModelsRoutes.js's and assemblyModels.js query hook's own
-// "HALF-LIVE FIELD" comments. The UI is required to say so rather than
-// implying the target is enforced today.
+// requiredClassificationAccuracy is evaluated by D57 (ADR 0004) and can
+// end a session when the Assembly Model's targetsMet rule is on (D56/D58).
+// The control still does not claim a population classification-accuracy
+// rate -- that number is not computed anywhere yet.
 
 import React from "react";
 import { Input } from "@/components/ui/input";
@@ -136,11 +134,11 @@ export default function Step2Targets() {
               </div>
 
               {isTargeted && !isContinuous && (
-                <p className="mt-2 text-xs text-amber-600">
-                  Not yet evaluated: no decision rule turns a diagnostic
-                  posterior into a discrete mastery classification until D57.
-                  This target is stored and served, not enforced by any
-                  session today.
+                <p className="mt-2 text-xs text-slate-500">
+                  Sessions stop once every targeted attribute is classified with
+                  at least this confidence (the probability that the assigned
+                  class is the true one for this student). The number is not
+                  the test&apos;s overall classification-accuracy rate.
                 </p>
               )}
             </div>

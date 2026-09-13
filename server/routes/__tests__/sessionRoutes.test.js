@@ -793,3 +793,82 @@ describe("POST /:id/submit — ITEM_DELIVERY_ENABLED rollback flag", () => {
     20000
   );
 });
+
+describe("GET /:id/next-task — persist the measurement stop (D58)", () => {
+  function chainForStopping(amOverrides = {}, sessionOverrides = {}) {
+    return makeDb({
+      competencyModels: [{ id: "cm1", versionNumber: 1, smVariables: [{ id: "smv-theta", type: "continuous" }] }],
+      competencies: [{ id: "c1", modelId: "cm1" }],
+      evidenceModels: [{ ...operationalEvidenceModel, competencyId: "c1" }],
+      assemblyModels: [{
+        id: "am1",
+        competencyModelId: "cm1",
+        status: "confirmed",
+        targetsBySMV: [{ smvId: "smv-theta", requiredSEM: 0.3 }],
+        stoppingRules: { maxItems: 1 },
+        ...amOverrides,
+      }],
+      sessions: [makeSession({
+        taskIds: ["t1", "t2"],
+        currentTaskIndex: 1,
+        selectionStrategy: "fixed",
+        responses: [{
+          taskId: "t1",
+          itemId: "item1",
+          itemVersion: 1,
+          taskModelVersion: 1,
+          evidenceModelId: "em1",
+          evidenceModelVersion: 1,
+          parameterSetId: "ps1",
+          parameterSource: "calibrated",
+          activated: true,
+        }],
+        ...sessionOverrides,
+      })],
+      tasks: [makeTask({ itemId: "item1" }), makeTask({ id: "t2", itemId: "item2" })],
+    });
+  }
+
+  it("persists stopped on the session when maxItems is reached before the task list ends", async () => {
+    const db = chainForStopping();
+    const app = buildApp(db);
+
+    const res = await request(app).get("/api/sessions/s1/next-task");
+
+    expect(res.body.taskId).toBeUndefined();
+    expect(res.body.stopped).toMatchObject({
+      rule: "maxItems",
+      assemblyModelId: "am1",
+    });
+    expect(res.body.stopped.reason).toMatch(/maxItems/);
+    expect(res.body.stopped.stoppedAt).toEqual(expect.any(String));
+    expect(db.sessions[0].stopped).toEqual(res.body.stopped);
+    expect(db.sessions[0].status).toBe("in_progress");
+    expect(saveDB).toHaveBeenCalled();
+  });
+
+  it("a later next-task returns the persisted stop even if the Assembly Model is gone", async () => {
+    const persisted = {
+      rule: "targetsMet",
+      assemblyModelId: "am-gone",
+      reason: "Every reported Assembly Model target is met (1 of 1) at 1 response(s).",
+      stoppedAt: "2026-09-13T06:00:00.000Z",
+    };
+    const db = makeDb({
+      assemblyModels: [],
+      sessions: [makeSession({
+        taskIds: ["t1", "t2"],
+        selectionStrategy: "fixed",
+        stopped: persisted,
+      })],
+      tasks: [makeTask(), makeTask({ id: "t2" })],
+    });
+    const app = buildApp(db);
+
+    const res = await request(app).get("/api/sessions/s1/next-task");
+
+    expect(res.body.stopped).toEqual(persisted);
+    expect(res.body.taskId).toBeUndefined();
+    expect(saveDB).not.toHaveBeenCalled();
+  });
+});

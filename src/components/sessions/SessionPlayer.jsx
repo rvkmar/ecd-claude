@@ -6,6 +6,7 @@ import { usePolicies } from "../../api/queries/policies";
 import { useAuth } from "../../auth/AuthProvider";
 import { apiFetch, apiErrorMessage } from "../../api/apiClient";
 import { SESSION_STATUS } from "../../utils/sessionStatus";
+import { measurementStopHeading, measurementStopDetails } from "./measurementStop";
 
 import { useNavigate, useParams } from "react-router-dom";
 // SessionPlayer.jsx
@@ -58,6 +59,10 @@ export default function SessionPlayer({
   const [loadingTask, setLoadingTask] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [noMoreTasks, setNoMoreTasks] = useState(false);
+  // D58: the Assembly Model stop, when /next-task (or a previously persisted
+  // session.stopped) says measurement is done. Distinct from noMoreTasks,
+  // which is also true for an empty task list that never met a target.
+  const [measurementStop, setMeasurementStop] = useState(null);
 
   // Inputs / runtime state
   const [selectedOptionId, setSelectedOptionId] = useState(null);
@@ -210,6 +215,7 @@ export default function SessionPlayer({
         if (cancelled) return;
 
         setSession(sess || null);
+        if (sess?.stopped) setMeasurementStop(sess.stopped);
 
         // enrich all tasks in the session
         let enrichedSess = sess;
@@ -315,6 +321,24 @@ export default function SessionPlayer({
         {},
         auth
       );
+
+      // D58: a stop is not "no tasks". Read data.stopped (the live decision,
+      // now also persisted on the session) and show its reason. Ignoring this
+      // field is exactly the defect that left every early-stopped session
+      // looking like an empty form.
+      if (data?.stopped) {
+        setMeasurementStop(data.stopped);
+        setCurrentTaskId(null);
+        setTask(null);
+        setQuestion(null);
+        setTaskModel(null);
+        setDeliveredItem(null);
+        setNoMoreTasks(true);
+        setReadingPassage(null);
+        setActivePassageId(null);
+        setActivePassageQuestions([]);
+        return;
+      }
 
       if (!data || !data.taskId) {
         // no tasks left
@@ -768,6 +792,50 @@ export default function SessionPlayer({
 
       {loadingTask ? (
         <div>Loading next activity...</div>
+      ) : measurementStop ? (
+        <div className="p-4 border rounded bg-green-50">
+          <p className="font-medium">{measurementStopHeading(measurementStop)}</p>
+          <p className="text-sm text-gray-700 mt-1">{measurementStop.reason}</p>
+          {measurementStopDetails(measurementStop).length > 0 && (
+            <ul className="mt-2 text-sm text-gray-700 list-disc ml-5">
+              {measurementStopDetails(measurementStop).map((t) => (
+                <li key={t.smvId || t.classification}>
+                  {t.smvId}
+                  {t.classification ? `: ${t.classification}` : ""}
+                  {Number.isFinite(t.expectedClassificationAccuracy)
+                    ? ` (confidence ${t.expectedClassificationAccuracy.toFixed(2)})`
+                    : ""}
+                  {Number.isFinite(t.requiredSEM)
+                    ? ` (SEM ${t.precision ?? "—"} ≤ ${t.requiredSEM})`
+                    : ""}
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="text-sm text-gray-600 mt-2">
+            You can finish the session or review responses.
+          </p>
+          <div className="mt-3 space-x-2">
+            {session?.status !== "completed" && (
+              <button
+                type="button"
+                onClick={() => setFinishModalOpen(true)}
+                disabled={session?.status === "paused" || finishing}
+                className="px-3 py-1 bg-red-500 text-white rounded disabled:opacity-50"
+              >
+                {finishing ? "Finishing..." : "Finish Session"}
+              </button>
+            )}
+            <a
+              href={`/api/reports/session/${sessionId}`}
+              target="_blank"
+              rel="noreferrer"
+              className="px-3 py-1 bg-indigo-600 text-white rounded"
+            >
+              Open Report (raw JSON)
+            </a>
+          </div>
+        </div>
       ) : noMoreTasks ? (
         <div className="p-4 border rounded bg-green-50">
           <p className="font-medium">No more tasks available.</p>

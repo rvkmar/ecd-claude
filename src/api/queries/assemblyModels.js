@@ -4,17 +4,12 @@
 // per-SMV accuracy targets (requiredSEM for continuous SMVs,
 // requiredClassificationAccuracy for binary ones), stopping rules, and
 // a validated pointer into `policies` naming the selection algorithm.
-// Consumed by the Assembly Model wizard (D54) and, once D56/D58 exist,
-// by Activity Selection and the session orchestrator.
-//
-// NOTE: requiredClassificationAccuracy is stored and served faithfully
-// but is not yet EVALUATED anywhere — no decision rule turns a
-// diagnostic posterior into a discrete mastery classification until
-// D57. The authoring UI is required to say so rather than implying the
-// target is enforced.
-//
 // Follows the established pattern: a key helper, hooks reading `auth`
 // from useAuth(), and every call through apiFetch — never a bare fetch.
+//
+// D57 evaluates requiredClassificationAccuracy (ADR 0004). D58 persists
+// the resulting stop on the session and shows it in the player. This
+// hook file only fetches the Assembly Model records themselves.
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../apiClient";

@@ -70,11 +70,12 @@ export default function Step5Review() {
       </div>
 
       {accuracyTargets.length > 0 && (
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          {accuracyTargets.length} of {(draft.targetsBySMV || []).length} target(s) use
-          requiredClassificationAccuracy, which is stored and served but not
-          yet evaluated by any session (no decision rule turns a diagnostic
-          posterior into a discrete classification until D57).
+        <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          {accuracyTargets.length} of {(draft.targetsBySMV || []).length} target(s)
+          use requiredClassificationAccuracy. With stoppingRules.targetsMet,
+          a session ends once every such target is met at the stated confidence
+          (D57/D58). That figure is this student&apos;s classification
+          confidence, not a population classification-accuracy rate.
         </div>
       )}
 

@@ -244,3 +244,39 @@ describe("sessions.studentModel.smvPosteriors — the accumulated posterior's pe
     expect(errors.join(" ")).toMatch(/smvPosteriors\['smv2'\]\.precision/);
   });
 });
+
+describe("sessions.stopped — D58 persisted measurement stop", () => {
+  const validStop = {
+    rule: "targetsMet",
+    assemblyModelId: "am1",
+    reason: "Every reported Assembly Model target is met.",
+    stoppedAt: "2026-09-13T06:00:00.000Z",
+  };
+
+  it("accepts a well-formed stop on an in-progress session", () => {
+    const { errors } = validateEntity(
+      "sessions",
+      { ...makeSession([]), stopped: validStop },
+      makeDb()
+    );
+    expect(errors).toEqual([]);
+  });
+
+  it("refuses an invented coverage rule", () => {
+    const { errors } = validateEntity(
+      "sessions",
+      { ...makeSession([]), stopped: { ...validStop, rule: "coverage" } },
+      makeDb()
+    );
+    expect(errors.join(" ")).toMatch(/stopped\.rule must be 'maxItems' or 'targetsMet'/);
+  });
+
+  it("refuses a stop without a reason", () => {
+    const { errors } = validateEntity(
+      "sessions",
+      { ...makeSession([]), stopped: { ...validStop, reason: "  " } },
+      makeDb()
+    );
+    expect(errors.join(" ")).toMatch(/stopped\.reason must be a non-empty string/);
+  });
+});

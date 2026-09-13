@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- When a session meets an Assembly Model stopping rule, that decision is
+  stored on the session and shown to the examinee (D58). `/next-task` already
+  returned `{ stopped }`; the player treated any response without a taskId as
+  "No more tasks available", so a met accuracy target looked like an empty
+  form. The reason, the rule, and — for a diagnostic stop — each attribute's
+  classification now stay on the session record and on the ending screen.
+  Status is unchanged until the examinee finishes; a later `/next-task` does
+  not re-open a session whose stop has already been written.
+
 - Scoring a response now reads structural facts — the evidence-activation map,
   the evidence rule, the weights — from the active compiled item package for
   that task model, not by walking the live authoring graph on every submit
@@ -20,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decision is `docs/adr/0003a-identification-reads-the-active-package.md`.
   Finding F4 is closed (the library has an activation caller, and delivery no
   longer re-walks the authoring graph for Identification). This does not claim
-  a browser walk of adaptive selection (D56) or D58.
+  a browser walk of adaptive selection (D56).
 
 - Diagnostic sessions can now end on a measurement target rather than only on
   length (D57). A DINA / G-DINA attribute-mastery posterior is turned into a
@@ -209,10 +218,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   be set per Assembly Model or per attribute. 0.5 is the standard rule and the
   right default, but a programme wanting a stricter bar for a high-stakes
   attribute cannot express it yet.
-- A mastery classification is computed and returned but nothing displays it.
-  The session player still says only "no more tasks" when a session ends on a
-  measurement target, rather than saying the target was met — the information
-  is in the response and no screen reads it.
+- A mastery classification is shown on the session-player ending screen when
+  the session stopped on a diagnostic target (D58). It is still absent from
+  the learner/teacher report views (D59).
 - The expected classification accuracy reported for a student is the
   confidence in that student's own classification. It is deliberately not the
   test's overall classification-accuracy rate, which needs the whole
@@ -259,8 +267,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   confirmed Assembly Models match, none is applied rather than one being
   guessed at, so those sessions get no stopping rules at all.
 - When a session stops because its measurement targets were met, the player
-  shows the ordinary "no more tasks" ending. The reason is carried in the
-  response but nothing displays it yet.
+  now shows the stop reason (D58). The learner/teacher reports still do not.
 - Adaptive selection still picks the item whose difficulty sits closest to
   the current estimate rather than the one carrying most information at it.
   The latter is the better rule and is deliberately held back for the work

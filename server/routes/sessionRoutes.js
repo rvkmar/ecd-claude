@@ -622,13 +622,32 @@ router.get("/:id/next-task", (req, res) => {
   const session = db.sessions.find(s => s.id === req.params.id && !s.isCompleted);
   if (!session) return res.json({});
 
+  // D58: once a stopping rule has fired, the persisted record is the
+  // authority -- not a fresh re-evaluation that could disagree if the
+  // Assembly Model was later archived or a second matching model appeared.
+  // Status stays in_progress until the examinee (or /finish) closes it;
+  // this only stores *why* nothing more will be presented.
+  if (session.stopped && typeof session.stopped === "object") {
+    return res.json({
+      stopped: session.stopped,
+      strategy: session.selectionStrategy,
+    });
+  }
+
   // D56: the three strategies (fixed / IRT / BayesianNetwork), the
   // composite-library and live-posterior reads they now do, and Assembly
   // Model stopping rules all live in delivery/activitySelection.js. This
-  // route's only remaining job is to resolve the session and hand back what
-  // that module decides -- the same response shape as before for every
-  // session that has no Assembly Model governing it.
-  return res.json(selectNextActivity(session, db));
+  // route's remaining job is to resolve the session, persist a stop when
+  // that module decides one, and hand the decision back.
+  const decision = selectNextActivity(session, db);
+  if (decision.stopped) {
+    const stoppedAt = new Date().toISOString();
+    session.stopped = { ...decision.stopped, stoppedAt };
+    session.updatedAt = stoppedAt;
+    saveDB(db);
+    return res.json({ ...decision, stopped: session.stopped });
+  }
+  return res.json(decision);
 });
 
 // ------------------------------
