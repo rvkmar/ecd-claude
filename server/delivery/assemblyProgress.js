@@ -18,6 +18,20 @@
 // Day 17 (no lifecycle wiring, no "operational" gate exists yet for them),
 // so there is deliberately no status filter here either -- there is
 // nothing meaningful to filter on yet.
+//
+// Day 56 note: Assembly Models DID get lifecycle wiring at Day 54, and
+// activitySelection.js now applies a confirmed/operational filter of its
+// own before using any of this for a stopping decision. This module stays
+// unfiltered on purpose -- reporting "how close is this SMV to a target a
+// draft model declares" is useful, and ENDING a session on it is not the
+// same act. The filter belongs at the point of the decision.
+//
+// Day 57 note: `stoppingCriterionMet` is no longer null for every
+// classification-accuracy target -- see the requiredClassificationAccuracy
+// branch below and ADR 0004. It remains tri-state: null still means "no
+// one evaluated this", which is not the same statement as false.
+
+import { evaluateClassificationTarget } from "./attributeClassification.js";
 
 /**
  * @param {object[]} posteriors - accumulateEvidence()'s `posteriors` array
@@ -83,14 +97,32 @@ export function resolveAssemblyProgress(posteriors, db) {
       entry.requiredSEM = target.requiredSEM;
       entry.stoppingCriterionMet = posterior.precision <= target.requiredSEM;
     } else if (Number.isFinite(target.requiredClassificationAccuracy)) {
-      // A classification-accuracy target needs a decision rule (posterior
-      // -> discrete classification) this pipeline does not compute yet --
-      // that is Activity Selection/W11 territory. The target is still
-      // surfaced so it is visible, but whether it has been met is left
-      // unevaluated rather than approximated from a continuous estimate
-      // that was never meant to answer a classification question.
+      /* Day 57: evaluated at last. attributeClassification.js applies the
+         marginal-MAP rule at a stated threshold and reports the posterior
+         probability of the class it assigned -- see ADR 0004.
+
+         It still answers `null` for a posterior that is not a mastery
+         probability, which is the SAME scale discipline as the requiredSEM
+         branch above and for a sharper reason than drift: RAW_SCORE_SMV_TYPES
+         includes "binary", and schema.js REQUIRES
+         requiredClassificationAccuracy on a binary SMV, so a binary SMV
+         carrying a CTT/sum/threshold model produces a "weighted-proportion"
+         estimate in [0, 1] -- bounded exactly like a probability, and not
+         one -- through entirely valid records. Gating on `method` rather
+         than `smvType` is the Day 39 P1-6 correction applied to this side of
+         the module before it can be found the hard way. */
       entry.requiredClassificationAccuracy = target.requiredClassificationAccuracy;
-      entry.stoppingCriterionMet = null;
+
+      const decision = evaluateClassificationTarget(posterior, target.requiredClassificationAccuracy);
+      entry.stoppingCriterionMet = decision.met;
+
+      if (decision.classification !== undefined) {
+        entry.classification = decision.classification;
+        entry.expectedClassificationAccuracy = decision.expectedClassificationAccuracy;
+        entry.masteryThreshold = decision.threshold;
+      }
+      if (decision.note) entry.note = decision.note;
+      if (decision.advisory) entry.advisory = decision.advisory;
     } else {
       // A targetsBySMV entry with neither field set is malformed data,
       // not "no target" -- still surfaced, but with nothing to compare.

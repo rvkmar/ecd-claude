@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Diagnostic sessions can now end on a measurement target rather than only on
+  length (D57). A DINA / G-DINA attribute-mastery posterior is turned into a
+  discrete mastery classification at a stated threshold, and reported with the
+  probability that the classification is correct - so an Assembly Model's
+  `requiredClassificationAccuracy` target is evaluated instead of merely
+  displayed. It had been surfaced-but-unevaluated since it was introduced, and
+  the Assembly Model wizard has been telling authors so on screen.
+- A stopped session now says what it met. Previously every stopped-session
+  record named `requiredSEM` alone, so a session ended by a diagnostic target
+  reported `requiredSEM: undefined` and said nothing about the mastery decision
+  that ended it. A continuous (SEM) stop is unchanged.
+- `docs/adr/0004-mastery-classification-decision-rule.md` records the decision
+  rule, why the expected accuracy is the probability of the class actually
+  assigned rather than of the more probable one, and why the number reported
+  per student is not the test's population classification-accuracy rate.
+
 - Q-matrix editor (D51, partial): attributes×items grid for authoring DINA/G-DINA
   Q-matrices, scoped to a competency model's binary Student Model Variables, wired
   into the Admin page as a new "Q-Matrix" tab. See `claude/day51-w11-calibration-and-qmatrix-editor.md`
@@ -84,6 +100,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A classification-accuracy target is now evaluated only against an actual
+  attribute-mastery posterior. A binary Student Model Variable carrying a
+  classical (CTT / sum / threshold) model reports a weighted proportion of
+  score - a number between 0 and 1 that looks exactly like a mastery
+  probability and is not one - and that combination is authorable today, not a
+  drift scenario. Such a target is left explicitly unevaluated with a reason
+  naming the model, rather than classified as though the two scales were
+  comparable.
+- An attribute whose evidence is exactly balanced is now reported as
+  `indeterminate` rather than counted as "has not mastered". A Student Model
+  Variable with no declared prior starts at exactly 0.5, so this is a value the
+  pipeline produces on purpose, not a floating-point accident.
+
 - Q-matrix editor: the Competency Model picker now only lists models that
   declare at least one binary Student Model Variable, since a Q-matrix has
   nothing to bind to otherwise. Previously any competency model could be
@@ -154,6 +183,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - N/A
 
 ### Known gaps (carried forward, see progress ledger)
+
+- The mastery cut for a diagnostic classification is fixed at 0.5 and cannot
+  be set per Assembly Model or per attribute. 0.5 is the standard rule and the
+  right default, but a programme wanting a stricter bar for a high-stakes
+  attribute cannot express it yet.
+- A mastery classification is computed and returned but nothing displays it.
+  The session player still says only "no more tasks" when a session ends on a
+  measurement target, rather than saying the target was met — the information
+  is in the response and no screen reads it.
+- The expected classification accuracy reported for a student is the
+  confidence in that student's own classification. It is deliberately not the
+  test's overall classification-accuracy rate, which needs the whole
+  population and is not computed anywhere yet. Averaging the per-student
+  figures across a cohort will not produce it.
+- The guard that stops unused code shipping can miss an unused export whose
+  name is also used by another module — the two cover for each other. Found
+  by experiment while adding a new module; not yet fixed.
 
 - The Q-matrix's *advisory* rules (duplicate rows, weak identifiability,
   low coverage) have no server-side equivalent — by design, since they are

@@ -57,11 +57,91 @@ describe("resolveAssemblyProgress", () => {
     expect(result[0].stoppingCriterionMet).toBe(true);
   });
 
-  it("surfaces a classification-accuracy target as visible but unevaluated", () => {
+  /* Day 57 changed this test's REASON, not its assertion. It was written
+     when no decision rule existed at all; now one does, but this fixture's
+     posterior is `method: "eap"` -- theta on the real line, not a mastery
+     probability -- so it is still refused, now by the scale guard in
+     attributeClassification.js. See ADR 0004 decision 4. */
+  it("refuses a classification-accuracy target against a theta-scale posterior", () => {
     const am = assemblyModel({ targetsBySMV: [{ smvId: "smv1", requiredClassificationAccuracy: 0.85 }] });
     const result = resolveAssemblyProgress([posterior()], { assemblyModels: [am] });
     expect(result[0].requiredClassificationAccuracy).toBe(0.85);
     expect(result[0].stoppingCriterionMet).toBeNull();
+    expect(result[0].note).toMatch(/not on that scale/);
+    // No classification was made, so none is reported.
+    expect(result[0].classification).toBeUndefined();
+    expect(result[0].expectedClassificationAccuracy).toBeUndefined();
+  });
+
+  /** A genuine DINA/G-DINA attribute-mastery posterior -- the only kind a
+   *  classification target may be evaluated against. */
+  function masteryPosterior(overrides = {}) {
+    return posterior({
+      method: "attribute-mastery-posterior",
+      modelFamily: "dina",
+      smvType: "binary",
+      estimate: 0.92,
+      precision: Math.sqrt(0.92 * 0.08),
+      ...overrides,
+    });
+  }
+
+  it("evaluates a classification target against a mastery posterior and reports the decision", () => {
+    const am = assemblyModel({ targetsBySMV: [{ smvId: "smv1", requiredClassificationAccuracy: 0.85 }] });
+    const result = resolveAssemblyProgress([masteryPosterior()], { assemblyModels: [am] });
+
+    expect(result[0].stoppingCriterionMet).toBe(true);
+    expect(result[0].classification).toBe("master");
+    expect(result[0].expectedClassificationAccuracy).toBeCloseTo(0.92, 10);
+    expect(result[0].masteryThreshold).toBe(0.5);
+    expect(result[0].note).toBeUndefined();
+  });
+
+  it("reports not-met -- not null -- for a mastery posterior short of its target", () => {
+    const am = assemblyModel({ targetsBySMV: [{ smvId: "smv1", requiredClassificationAccuracy: 0.95 }] });
+    const result = resolveAssemblyProgress([masteryPosterior({ estimate: 0.7 })], { assemblyModels: [am] });
+
+    // false and null are different statements: "evaluated, not met" vs
+    // "nobody evaluated this". D56's stopping rule treats both as "do not
+    // stop", but only one of them is a measurement claim.
+    expect(result[0].stoppingCriterionMet).toBe(false);
+    expect(result[0].classification).toBe("master");
+    expect(result[0].expectedClassificationAccuracy).toBeCloseTo(0.7, 10);
+  });
+
+  it("classifies a low posterior as nonmaster with the complementary accuracy", () => {
+    const am = assemblyModel({ targetsBySMV: [{ smvId: "smv1", requiredClassificationAccuracy: 0.85 }] });
+    const result = resolveAssemblyProgress([masteryPosterior({ estimate: 0.1 })], { assemblyModels: [am] });
+
+    expect(result[0].classification).toBe("nonmaster");
+    expect(result[0].expectedClassificationAccuracy).toBeCloseTo(0.9, 10);
+    expect(result[0].stoppingCriterionMet).toBe(true);
+  });
+
+  it("a borderline posterior is distinguishable in the record from a confident one", () => {
+    const am = assemblyModel({ targetsBySMV: [{ smvId: "smv1", requiredClassificationAccuracy: 0.85 }] });
+
+    const borderline = resolveAssemblyProgress([masteryPosterior({ estimate: 0.52 })], { assemblyModels: [am] })[0];
+    const confident = resolveAssemblyProgress([masteryPosterior({ estimate: 0.97 })], { assemblyModels: [am] })[0];
+
+    // Same classification, very different warrant -- and the record says so.
+    expect(borderline.classification).toBe("master");
+    expect(confident.classification).toBe("master");
+    expect(borderline.expectedClassificationAccuracy).toBeCloseTo(0.52, 10);
+    expect(confident.expectedClassificationAccuracy).toBeCloseTo(0.97, 10);
+    expect(borderline.stoppingCriterionMet).toBe(false);
+    expect(confident.stoppingCriterionMet).toBe(true);
+  });
+
+  it("carries an advisory when a target sits at or below the floor of the measure", () => {
+    const am = assemblyModel({ targetsBySMV: [{ smvId: "smv1", requiredClassificationAccuracy: 0.4 }] });
+    const result = resolveAssemblyProgress([masteryPosterior({ estimate: 0.51 })], { assemblyModels: [am] });
+
+    // Honestly met -- the schema permits (0, 1] -- but it cannot fail, and
+    // an author who wrote it almost certainly did not mean "stop on the
+    // first scored response".
+    expect(result[0].stoppingCriterionMet).toBe(true);
+    expect(result[0].advisory).toMatch(/cannot fail/);
   });
 
   it("omits an SMV with no Assembly Model targeting its Competency Model", () => {

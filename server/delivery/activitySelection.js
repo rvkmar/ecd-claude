@@ -84,12 +84,15 @@
 // ------------------------------------------------------------------
 // WHAT THIS MODULE DELIBERATELY DOES NOT DO
 // ------------------------------------------------------------------
-// * It does not decide a mastery CLASSIFICATION. A targetsBySMV entry
-//   carrying requiredClassificationAccuracy is reported by
-//   assemblyProgress.js with `stoppingCriterionMet: null`, and null is not
-//   true -- so such a target can never satisfy a `targetsMet` stopping rule
-//   here. That is D57's unit, and pretending otherwise would stop sessions
-//   on a criterion nobody has evaluated.
+// * It does not decide a mastery CLASSIFICATION itself. Day 57 built that
+//   rule in attributeClassification.js and assemblyProgress.js applies it,
+//   so a requiredClassificationAccuracy target now arrives here as a real
+//   boolean and flows through the `targetsMet` filter below unmodified --
+//   no change was needed in this module for diagnostic sessions to stop on
+//   their own targets. What still arrives as `null` is a target nobody
+//   could evaluate: a classification target against a posterior that is not
+//   a mastery probability, or a SEM target on an incomparable scale. null
+//   is still not true, and still never stops a session.
 // * It does not override the session's own `selectionStrategy` with the
 //   Assembly Model's `selectionAlgorithm` pointer. A mismatch between the
 //   two is reported as a warning. D49a's own open decision settled this
@@ -386,10 +389,11 @@ function resolveAssemblyModelForSession(session, db) {
  *                 above minItems.
  *
  * `stoppingCriterionMet` is tri-state in assemblyProgress.js: true, false,
- * or null for a target nobody can evaluate yet (a classification-accuracy
- * target, pending D57; or a SEM target on a scale it cannot be compared
- * against). Only `true` counts. An empty progress list also never stops a
- * session -- "no targets could be evaluated" is not "all targets met".
+ * or null for a target nobody can evaluate (a SEM target on a scale it
+ * cannot be compared against, or -- since D57 -- a classification target
+ * against a posterior that is not a mastery probability). Only `true`
+ * counts. An empty progress list also never stops a session -- "no targets
+ * could be evaluated" is not "all targets met".
  */
 function evaluateStoppingRules(session, assemblyModel, db) {
   const stoppingRules = assemblyModel.stoppingRules || {};
@@ -446,12 +450,27 @@ function evaluateStoppingRules(session, assemblyModel, db) {
         rule: "targetsMet",
         assemblyModelId: assemblyModel.id,
         reason: `Every reported Assembly Model target is met (${progress.length} of ${progress.length}) at ${delivered} response(s).`,
-        targets: progress.map((p) => ({
-          smvId: p.smvId,
-          estimate: p.estimate,
-          precision: p.precision,
-          requiredSEM: p.requiredSEM,
-        })),
+        /* Day 57: a diagnostic target reports what it actually met. Before
+           this, every stopped-session record named `requiredSEM` alone, so
+           a session stopped on a classification target reported
+           `requiredSEM: undefined` and said nothing about the mastery
+           decision that ended it. Both shapes are emitted only when
+           present, so a SEM stop is byte-identical to what it was. */
+        targets: progress.map((p) => {
+          const target = {
+            smvId: p.smvId,
+            estimate: p.estimate,
+            precision: p.precision,
+          };
+          if (p.requiredSEM !== undefined) target.requiredSEM = p.requiredSEM;
+          if (p.requiredClassificationAccuracy !== undefined) {
+            target.requiredClassificationAccuracy = p.requiredClassificationAccuracy;
+            target.classification = p.classification;
+            target.expectedClassificationAccuracy = p.expectedClassificationAccuracy;
+            target.masteryThreshold = p.masteryThreshold;
+          }
+          return target;
+        }),
       },
       warnings,
     };

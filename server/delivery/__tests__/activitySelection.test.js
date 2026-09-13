@@ -795,10 +795,23 @@ describe("stopping rules", () => {
     expect(result.stopped.rule).toBe("maxItems");
   });
 
-  it("a classification-accuracy target can never satisfy targetsMet before D57", () => {
-    // assemblyProgress.js reports stoppingCriterionMet: null for these --
-    // null is not true, and treating it as met would end a session on a
-    // criterion no code in this repo evaluates yet.
+  /* Day 57 rewrote this test's REASON without changing its assertion.
+     It was written as "a classification target can never satisfy
+     targetsMet before D57", on the premise that assemblyProgress.js
+     answers null for all of them. D57 makes most of them evaluable -- but
+     not this fixture, because `smv-theta` is continuous and its posterior
+     comes back from the EAP branch on the theta scale, which is not a
+     mastery probability. So the assertion still holds, now as a scale
+     guard rather than an unbuilt-feature guard.
+
+     Worth stating plainly: this fixture is not schema-authorable at all
+     (schema.js refuses requiredClassificationAccuracy on a continuous
+     SMV) and reaches this code only because the test builds `db`
+     directly. It is kept because the guard must hold for records that
+     drift past validation, and because the *authorable* version of the
+     same collision -- a binary SMV carrying a raw-score model -- is
+     covered in attributeClassification.test.js. */
+  it("a classification target against a theta-scale posterior never stops a session", () => {
     const db = irtDb({
       assemblyModels: [
         assemblyModel({
@@ -851,6 +864,96 @@ describe("stopping rules", () => {
 
     expect(result.stopped).toMatchObject({ rule: "targetsMet", assemblyModelId: "am1" });
     expect(result.stopped.targets[0].smvId).toBe("smv-theta");
+  });
+
+  /* Day 57's end-to-end clause: a DIAGNOSTIC session, driven through the
+     real accumulation -> classification -> stopping chain. Before D57 this
+     could not happen at all -- assemblyProgress.js answered null for every
+     classification target, so a diagnostic Assembly Model's targetsMet rule
+     was inert no matter what the student did. No code in THIS module
+     changed to make it work; the tri-state D56 built simply started
+     carrying a real boolean. */
+  describe("a diagnostic session stops on its classification target (D57)", () => {
+    function diagnosticSession(overrides = {}) {
+      return session({
+        taskIds: ["tA", "tB"],
+        currentTaskIndex: 1,
+        selectionStrategy: "BayesianNetwork",
+        responses: [
+          {
+            taskId: "tA",
+            itemId: "itemA",
+            evidenceModelId: "emD",
+            evidenceModelVersion: 1,
+            observableId: "oA",
+            parameterSource: "pilot",
+            // D53b pins the item's pilot slip/guess onto the response so a
+            // later edit to the item cannot rewrite a scored session.
+            pilotParams: { slip: 0.1, guess: 0.2 },
+            activated: true,
+            direction: "supports",
+            strength: 4,
+          },
+        ],
+        ...overrides,
+      });
+    }
+
+    function diagnosticDb(requiredClassificationAccuracy) {
+      return dinaDb({
+        assemblyModels: [
+          assemblyModel({
+            targetsBySMV: [{ smvId: "attrA", requiredClassificationAccuracy }],
+            stoppingRules: { targetsMet: true, minItems: 1 },
+          }),
+        ],
+      });
+    }
+
+    it("stops once the mastery classification is confident enough", () => {
+      // One correct response to a slip-0.1 / guess-0.2 item moves attrA's
+      // marginal to 0.9/(0.9+0.2) = 0.818..., so a target of 0.8 is met and
+      // the session ends on measurement rather than on length.
+      const result = selectNextActivity(diagnosticSession(), diagnosticDb(0.8));
+
+      expect(result.taskId).toBeUndefined();
+      expect(result.stopped.rule).toBe("targetsMet");
+
+      const target = result.stopped.targets.find((t) => t.smvId === "attrA");
+      expect(target.classification).toBe("master");
+      expect(target.expectedClassificationAccuracy).toBeCloseTo(0.9 / (0.9 + 0.2), 10);
+      expect(target.masteryThreshold).toBe(0.5);
+      expect(target.requiredClassificationAccuracy).toBe(0.8);
+    });
+
+    it("does NOT stop while the classification is still short of its target", () => {
+      // Same evidence, a stricter target: 0.818... < 0.95, so the student
+      // gets another item.
+      const result = selectNextActivity(diagnosticSession(), diagnosticDb(0.95));
+
+      expect(result.stopped).toBeUndefined();
+      expect(result.taskId).toBe("tB");
+    });
+
+    it("a SEM stop still reports the shape it always did", () => {
+      // The stopped-session record gained classification fields; a
+      // continuous target must not have gained them.
+      const db = irtDb({
+        assemblyModels: [
+          assemblyModel({
+            targetsBySMV: [{ smvId: "smv-theta", requiredSEM: 5 }],
+            stoppingRules: { targetsMet: true, minItems: 1 },
+          }),
+        ],
+      });
+
+      const target = selectNextActivity(accumulatingSession(), db).stopped.targets[0];
+
+      expect(target.requiredSEM).toBe(5);
+      expect(target).not.toHaveProperty("classification");
+      expect(target).not.toHaveProperty("requiredClassificationAccuracy");
+      expect(target).not.toHaveProperty("expectedClassificationAccuracy");
+    });
   });
 
   it("targetsMet does NOT stop while a target is unmet", () => {
