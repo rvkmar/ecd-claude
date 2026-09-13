@@ -232,21 +232,66 @@ export function evaluateClassificationTarget(
   return result;
 }
 
-/* The module's public API is ONE function: evaluateClassificationTarget(),
-   which assemblyProgress.js calls. Everything above is internal
-   decomposition -- exporting it would be the F4/G4 pattern this repo's
-   dead-export guard exists to catch ("exercised by its own tests, invoked
-   from nowhere"), and the guard did catch it.
+/**
+ * D59: the attribute profile a report may show.
+ *
+ * This is the same decision rule as evaluateClassificationTarget, without
+ * asking whether an Assembly Model target was met. A report has to name
+ * every classifiable SMV the session actually measured — including when
+ * the session ended on maxItems, or was finished by hand, or never had a
+ * governing Assembly Model. Stopping is a different question (D56–D58);
+ * the profile is just the classifications.
+ *
+ * Accepts either accumulateEvidence()'s `posteriors` array or the persisted
+ * `session.studentModel.smvPosteriors` map. A persisted posterior has no
+ * `supported` flag (applyPosteriorsToSession only writes supported ones);
+ * an accumulation row still has to pass that flag so an unsupported SMV
+ * is not classified from a refused estimate.
+ *
+ * @param {object[]|object|null|undefined} posteriors
+ * @param {number} [threshold=DEFAULT_MASTERY_THRESHOLD]
+ * @returns {{smvId: string, estimate: number, classification: string,
+ *            expectedClassificationAccuracy: number|null,
+ *            masteryThreshold: number}[]}
+ */
+export function classifyAttributeProfile(posteriors, threshold = DEFAULT_MASTERY_THRESHOLD) {
+  const rows = Array.isArray(posteriors)
+    ? posteriors
+    : posteriors && typeof posteriors === "object"
+      ? Object.values(posteriors)
+      : [];
+
+  const profile = [];
+  for (const posterior of rows) {
+    if (!posterior || typeof posterior !== "object") continue;
+    if (posterior.supported === false) continue;
+    if (!isClassifiablePosterior(posterior)) continue;
+
+    const classified = classifyMastery(posterior.estimate, threshold);
+    if (!classified) continue;
+
+    profile.push({
+      smvId: posterior.smvId,
+      estimate: posterior.estimate,
+      classification: classified.classification,
+      expectedClassificationAccuracy: classified.expectedClassificationAccuracy,
+      masteryThreshold: classified.threshold,
+    });
+  }
+  return profile;
+}
+
+/* evaluateClassificationTarget() is what assemblyProgress.js calls.
+   classifyAttributeProfile() is what the report routes call (D59).
+   Everything above those two is internal decomposition -- exporting it
+   would be the F4/G4 pattern this repo's dead-export guard exists to
+   catch ("exercised by its own tests, invoked from nowhere").
 
    The internals are still worth testing directly: ADR 0004 reasons about
    the decision rule, the accuracy formula and the scale gate separately,
-   and a test that could only reach them through evaluateClassificationTarget
+   and a test that could only reach them through the public functions
    would be testing three things at once. Same situation, same shape, as
-   attributeAccumulation.js's own __testing__ export.
-
-   When a reporting surface needs a classification (D59's report split, or
-   D79's cohort summaries), promote what it calls to a real export at that
-   point -- with the caller landing in the same change, never ahead of it. */
+   attributeAccumulation.js's own __testing__ export. */
 export const __testing__ = {
   DEFAULT_MASTERY_THRESHOLD,
   CLASSIFIABLE_METHOD,

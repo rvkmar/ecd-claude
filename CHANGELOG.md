@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Session reports now carry the D57 attribute classification and the D58
+  stop reason (D59). Learner feedback, the teacher report, the generic
+  session report, the report header, the session-list badge, and the
+  session-player header all show them. The player ending screen was D58;
+  these surfaces were deliberately left out then.
+
 - When a session meets an Assembly Model stopping rule, that decision is
   stored on the session and shown to the examinee (D58). `/next-task` already
   returned `{ stopped }`; the player treated any response without a taskId as
@@ -210,7 +216,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- N/A
+- An examinee can no longer retrieve teacher-report payloads (D59).
+  `GET /api/reports/session/:id/teacher-report`, the class report, and the
+  district report are gated with `authorizeRole(["admin", "district",
+  "teacher"])`. `SessionReport` stops requesting the teacher payload when
+  the signed-in role cannot view `teacherReports`. The dashboard role is
+  taken from the token, not from `?role=`.
 
 ### Known gaps (carried forward, see progress ledger)
 
@@ -218,9 +229,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   be set per Assembly Model or per attribute. 0.5 is the standard rule and the
   right default, but a programme wanting a stricter bar for a high-stakes
   attribute cannot express it yet.
-- A mastery classification is shown on the session-player ending screen when
-  the session stopped on a diagnostic target (D58). It is still absent from
-  the learner/teacher report views (D59).
+- ~~A mastery classification was absent from learner/teacher report views~~
+  closed D59 (player ending screen was D58; reports / header / list badge now).
 - The expected classification accuracy reported for a student is the
   confidence in that student's own classification. It is deliberately not the
   test's overall classification-accuracy rate, which needs the whole
@@ -266,8 +276,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   session is inferred from the competency model its tasks measure; where two
   confirmed Assembly Models match, none is applied rather than one being
   guessed at, so those sessions get no stopping rules at all.
-- When a session stops because its measurement targets were met, the player
-  now shows the stop reason (D58). The learner/teacher reports still do not.
+- ~~Stop reason missing from learner/teacher reports~~ closed D59.
 - Adaptive selection still picks the item whose difficulty sits closest to
   the current estimate rather than the one carrying most information at it.
   The latter is the better rule and is deliberately held back for the work

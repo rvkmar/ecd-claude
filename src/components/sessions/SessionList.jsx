@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import Modal from "../ui/Modal";
 import { SESSION_STATUS } from "@/utils/sessionStatus";
+import { measurementStopHeading } from "./measurementStop";
 
 // SessionList.jsx
 // Presentational list for sessions. Receives `sessions` and optional `students`.
@@ -103,32 +104,42 @@ export default function SessionList({
             <div className="flex items-baseline justify-between">
               <h3 className="text-lg font-semibold">{s.id}</h3>
               {/* Status badge with extended lifecycle support */}
-              <span
-                className={`text-xs px-2 py-1 rounded ${
-                  s.status === "reviewed"
-                    ? "bg-green-200 text-green-900"
+              <span className="flex items-center gap-1">
+                {s.stopped?.rule && (
+                  <span
+                    className="text-xs px-2 py-1 rounded bg-emerald-100 text-emerald-900"
+                    data-testid={`session-stop-badge-${s.id}`}
+                  >
+                    {measurementStopHeading(s.stopped)}
+                  </span>
+                )}
+                <span
+                  className={`text-xs px-2 py-1 rounded ${
+                    s.status === "reviewed"
+                      ? "bg-green-200 text-green-900"
+                      : s.autoFinished
+                      ? "bg-yellow-100 text-yellow-800"
+                      : s.status === "submitted" || s.isCompleted
+                      ? "bg-blue-100 text-blue-800"
+                      : s.status === "paused"
+                      ? "bg-orange-100 text-orange-800"
+                      : s.status === "archived"
+                      ? "bg-gray-300 text-gray-700"
+                      : "bg-yellow-100 text-yellow-800"
+                  }`}
+                >
+                  {s.status === "reviewed"
+                    ? "Reviewed"
                     : s.autoFinished
-                    ? "bg-yellow-100 text-yellow-800"
+                    ? "Auto-finished"
                     : s.status === "submitted" || s.isCompleted
-                    ? "bg-blue-100 text-blue-800"
+                    ? "Submitted"
                     : s.status === "paused"
-                    ? "bg-orange-100 text-orange-800"
+                    ? "Paused"
                     : s.status === "archived"
-                    ? "bg-gray-300 text-gray-700"
-                    : "bg-yellow-100 text-yellow-800"
-                }`}
-              >
-                {s.status === "reviewed"
-                  ? "Reviewed"
-                  : s.autoFinished
-                  ? "Auto-finished"
-                  : s.status === "submitted" || s.isCompleted
-                  ? "Submitted"
-                  : s.status === "paused"
-                  ? "Paused"
-                  : s.status === "archived"
-                  ? "Archived"
-                  : "In Progress"}
+                    ? "Archived"
+                    : "In Progress"}
+                </span>
               </span>
             </div>
 

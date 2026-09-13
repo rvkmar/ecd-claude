@@ -19,6 +19,13 @@ describe("student role", () => {
     expect(can("student", "view", "reports")).toBe(true);
   });
 
+  it("cannot view teacher-report payloads (D59 examinee leak)", () => {
+    expect(can("student", "view", "teacherReports")).toBe(false);
+    expect(can("teacher", "view", "teacherReports")).toBe(true);
+    expect(can("district", "view", "teacherReports")).toBe(true);
+    expect(can("admin", "view", "teacherReports")).toBe(true);
+  });
+
   it("cannot view authoring entities", () => {
     expect(can("student", "view", "questions")).toBe(false);
     expect(can("student", "view", "competencyModels")).toBe(false);
