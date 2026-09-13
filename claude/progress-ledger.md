@@ -6,19 +6,20 @@ Restored 2026-09-13 at D58 close. The file was missing from the repo; this recon
 
 | | |
 |---|---|
-| Last completed unit | **D58** (revised) — persist + show Assembly Model stop |
-| Next queued | **D59** — report split / attribute profile / examinee leak |
+| Last completed unit | **D59** — role-split reports / attribute profile / examinee leak |
+| Next queued | **D60** — never-compress adversarial review of selection/stopping (own session) |
 | Block | W12 — Activity Selection, stopping, reporting |
 | Block gate | Sessions end on an accuracy target, not only on length; attribute-profile report renders |
-| Gate status | Stopping **evaluates, persists, and shows** in the student player (live, 2026-09-13). Attribute-profile **report** is D59. |
+| Gate status | Stopping evaluates, persists, and shows in the student player (D58). Attribute-profile **report** renders, role-split; examinee cannot GET teacher-report (D59). |
 | HEAD at D58 code | `ede5f33` |
-| HEAD at this close | see close commit |
+| HEAD at D59 | this branch |
 
 ## Session log
 
 | Date (IST) | Units | Tier mix | Notes |
 |---|---|---|---|
 | 2026-09-13 | D58 | 2, alone | Premise rewritten: no new orchestrator. Persist `session.stopped`; player reads `data.stopped`. Live player walk later the same day: `s1789288381307` showed "Measurement target met" / attrA master 0.95. |
+| 2026-09-13 | D59 | 2, alone | Closed examinee leak on `teacher-report`. Role-split `SessionReport` / `reportsRoutes`. Classification + stop on report header, learner/teacher tabs, session list badge, session-player header. D60 not started. |
 
 ## Compression debt
 
@@ -29,6 +30,7 @@ Restored 2026-09-13 at D58 close. The file was missing from the repo; this recon
 | D56 | Adaptive selection not live-browser | Tests only | D71 | open |
 | D58 | Live diagnostic-session ending screen not walked at first close | Walked later 2026-09-13 on `s1789288381307` | D58 | **closed** |
 | D57 | Author UI said accuracy was unevaluated | Folded into D58 | D58 | **closed** |
+| D59 | Live report-surface browser walk skipped | Component + route tests; no running TLS stack this session | D71 | open |
 | D46 | Phase-2 `apiFetch` | — | — | **closed** (`e533a77` / PRs #5–#6) |
 | D54 | Wizard readiness mirror has no agreement test | Token | W12 close | open |
 
@@ -39,17 +41,20 @@ Debt against the never-compress list is not permitted. **D60** is next on that l
 | Unit | Plan assumed | Code actually was | Became |
 |---|---|---|---|
 | D58 | Write `sessionOrchestrator.js`; stop on accuracy, length, or coverage | Stop already in `activitySelection.js`; no coverage field | Persist `{ stopped }` on the session; player shows the reason; do not add a second orchestrator |
+| D59 | Split reports by role; attribute-profile UI; close teacher-report leak | One stack (`reportsRoutes` + `SessionReport`); teacher-report was authenticate-only; classification already computed, not shown on reports | Gate teacher routes with `authorizeRole`; stop the client fetching them as a student; attach `stopped` + `attributeProfile` to existing payloads/surfaces |
 
 ## Carried-forward gaps
 
 - ~~F4 — `buildCompositeLibrary()` has no caller~~ closed D49a + D49c
 - ~~F3 — client computes the score~~ closed D47
 - ~~Classification accuracy visible but unevaluated~~ closed D57; persist/show closed D58
+- ~~Classification on reports~~ closed D59
+- ~~Examinee can GET teacher-report~~ closed D59
 - Mastery cut fixed at 0.5 — still true
-- Classification on reports — D59
 - `gdina` has no pilot path
 - Session not bound to a specific Assembly Model (ambiguous match → none applied)
 - Adaptive selection: nearest difficulty, not max information (held for benchmark work)
 - Chunk >500 kB — D74
 - Student My Sessions placeholder
 - Dead-export guard can miss unused exports that share a name
+- Session ownership-scoping (a student may only read their own session) — still open; D59 closed the role leak only

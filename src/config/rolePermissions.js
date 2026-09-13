@@ -20,6 +20,11 @@ export const rolePermissions = {
       "policies",
       "curricularPolicies",
       "reports",
+      // D59: the staff-only teacher-report / class / district payloads.
+      // `reports` stays the learner + dashboard surface every role that
+      // can view reports already had. Students keep `reports` and must
+      // not gain `teacherReports` — that was the examinee leak.
+      "teacherReports",
       "students",
       "teachers",
       "users",
@@ -84,6 +89,7 @@ export const rolePermissions = {
       "tasks",
       "sessions",
       "reports",
+      "teacherReports",
       // Read-only: a Q-matrix and an assembly model are system-level
       // measurement decisions (which attributes a diagnostic model
       // estimates; when any session built on the spec may stop), not
@@ -114,7 +120,8 @@ export const rolePermissions = {
       "taskModels",
       "tasks",
       "sessions",
-      "reports"
+      "reports",
+      "teacherReports"
     ],
     canEdit: [
       "tasks",
@@ -136,6 +143,9 @@ export const rolePermissions = {
   // its `if (!r) return false` branch for every student — silently denying
   // every permission check by omission rather than by design. Students only
   // need to see their own sessions/reports; they don't author content.
+  // D59: `reports` is learner feedback + the generic session report.
+  // `teacherReports` is deliberately absent — a student must not fetch
+  // the teacher-report payload (server: authorizeRole on those routes).
   student: {
     label: "Student",
     canView: ["sessions", "reports"],

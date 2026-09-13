@@ -46,7 +46,7 @@ beforeEach(() => {
     if (href.includes("/next-task")) {
       body = { stopped: STOPPED, strategy: "BayesianNetwork" };
     } else if (href.includes("/api/sessions/")) {
-      body = { id: "s-stop", status: "in_progress", taskIds: [], responses: [] };
+      body = { id: "s-stop", status: "in_progress", taskIds: [], responses: [], stopped: STOPPED };
     } else {
       body = [];
     }
@@ -79,10 +79,11 @@ describe("SessionPlayer — measurement stop copy (D58)", () => {
     );
 
     expect(
-      await screen.findByText("Measurement target met")
+      await screen.findByText("Measurement target met", { selector: "p.font-medium" })
     ).toBeInTheDocument();
-    expect(screen.getByText(STOPPED.reason)).toBeInTheDocument();
+    expect(screen.getAllByText(STOPPED.reason).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/attrA: master/)).toBeInTheDocument();
+    expect(screen.getByTestId("session-detail-stop")).toHaveTextContent("Measurement target met");
     expect(screen.queryByText("No more tasks available.")).toBeNull();
 
     await waitFor(() => {

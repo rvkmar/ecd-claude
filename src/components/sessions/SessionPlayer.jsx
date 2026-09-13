@@ -770,6 +770,12 @@ export default function SessionPlayer({
               )}
             </div>
           )}
+          {session?.stopped && (
+            <div className="text-sm text-emerald-800 mt-1" data-testid="session-detail-stop">
+              {measurementStopHeading(session.stopped)}
+              {session.stopped.reason ? ` — ${session.stopped.reason}` : ""}
+            </div>
+          )}
         </div>
       </div>
 

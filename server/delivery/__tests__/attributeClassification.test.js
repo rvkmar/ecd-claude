@@ -16,13 +16,12 @@
 // ADR 0004 carries the reasoning.
 
 import { describe, it, expect } from "vitest";
-import { evaluateClassificationTarget, __testing__ } from "../attributeClassification.js";
+import { evaluateClassificationTarget, classifyAttributeProfile, __testing__ } from "../attributeClassification.js";
 import { __testing__ as accumulationTesting } from "../attributeAccumulation.js";
 
-/* evaluateClassificationTarget is the module's only public export; the rule
-   it is built from is reached through __testing__ so the arithmetic can be
-   tested at the level ADR 0004 reasons about it. See the note at the foot of
-   attributeClassification.js for why these are not exported outright. */
+/* evaluateClassificationTarget and classifyAttributeProfile are the public
+   exports; the rule they are built from is reached through __testing__ so
+   the arithmetic can be tested at the level ADR 0004 reasons about it. */
 const {
   classifyMastery,
   meetsClassificationTarget,
@@ -393,5 +392,48 @@ describe("refusals", () => {
     const result = evaluateClassificationTarget(masteryPosterior({ estimate: 1.4 }), 0.9);
     expect(result.met).toBeNull();
     expect(result.note).toMatch(/not a usable/);
+  });
+});
+
+/* ------------------------------------------------------------------
+   6. D59 — classifyAttributeProfile (report surface, no target)
+------------------------------------------------------------------ */
+
+describe("classifyAttributeProfile — D59 report profile", () => {
+  it("classifies every classifiable posterior and skips the rest", () => {
+    const profile = classifyAttributeProfile([
+      masteryPosterior({ smvId: "attrA", estimate: 0.9 }),
+      masteryPosterior({ smvId: "attrB", estimate: 0.2 }),
+      masteryPosterior({ smvId: "theta", method: "eap", estimate: 0.4 }),
+      masteryPosterior({ smvId: "unsupported", supported: false, estimate: 0.99 }),
+    ]);
+    expect(profile.map((r) => r.smvId)).toEqual(["attrA", "attrB"]);
+    expect(profile[0]).toMatchObject({
+      smvId: "attrA",
+      classification: "master",
+      expectedClassificationAccuracy: 0.9,
+      masteryThreshold: 0.5,
+    });
+    expect(profile[1].classification).toBe("nonmaster");
+    expect(profile[1].expectedClassificationAccuracy).toBeCloseTo(0.8, 12);
+  });
+
+  it("accepts the persisted smvPosteriors map (no `supported` flag)", () => {
+    const profile = classifyAttributeProfile({
+      attrA: {
+        smvId: "attrA",
+        method: CLASSIFIABLE_METHOD,
+        modelFamily: "dina",
+        estimate: 0.95,
+      },
+    });
+    expect(profile).toHaveLength(1);
+    expect(profile[0].classification).toBe("master");
+  });
+
+  it("returns [] for missing or empty input", () => {
+    expect(classifyAttributeProfile(undefined)).toEqual([]);
+    expect(classifyAttributeProfile(null)).toEqual([]);
+    expect(classifyAttributeProfile({})).toEqual([]);
   });
 });

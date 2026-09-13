@@ -2,16 +2,22 @@ import React, { useEffect, useState } from "react";
 import { usePolicies } from "../../api/queries/policies";
 import { useAuth } from "../../auth/AuthProvider";
 import { apiFetch } from "../../api/apiClient";
+import { can } from "../../config/rolePermissions";
+import { measurementStopHeading, measurementStopDetails } from "./measurementStop";
+import AttributeProfileList from "./AttributeProfileList";
 
 // SessionReport.jsx
 // Props:
 // - sessionId: string (required)
 // - onClose?: callback to close modal/view
 //
-// Fetches reports from:
-// - /api/reports/session/:id
-// - /api/reports/session/:id/learner-feedback
-// - /api/reports/session/:id/teacher-report
+// D59: fetches are role-split. Every authenticated role may load
+//   /api/reports/session/:id
+//   /api/reports/session/:id/learner-feedback
+// Staff (admin / district / teacher) also load
+//   /api/reports/session/:id/teacher-report
+// An examinee must not request that last payload — the server now
+// refuses it, and this component must not ask.
 
 export default function SessionReport({ sessionId, onClose }) {
   const [loading, setLoading] = useState(true);
@@ -20,12 +26,10 @@ export default function SessionReport({ sessionId, onClose }) {
   const [learnerFeedback, setLearnerFeedback] = useState(null);
   const [teacherReport, setTeacherReport] = useState(null);
   const [tab, setTab] = useState("learner");
-  
-  // Policy name resolution now goes through the shared usePolicies() cache
-  // (see src/api/queries/policies.js) instead of its own fetch — Phase 2
-  // data-layer migration.
+
   const { auth } = useAuth() || {};
   const { data: policies = [] } = usePolicies();
+  const canViewTeacherReports = can(auth?.role, "view", "teacherReports");
 
   const getPolicyName = (policyId) => {
     if (!policyId) return null;
@@ -36,26 +40,42 @@ export default function SessionReport({ sessionId, onClose }) {
   useEffect(() => {
     if (!sessionId) return;
     setLoading(true);
-    Promise.all([
+    setError(null);
+    setTeacherReport(null);
+
+    const requests = [
       apiFetch(`/api/reports/session/${sessionId}`, {}, auth),
       apiFetch(`/api/reports/session/${sessionId}/learner-feedback`, {}, auth),
-      apiFetch(`/api/reports/session/${sessionId}/teacher-report`, {}, auth),
-    ])
+    ];
+    if (canViewTeacherReports) {
+      requests.push(apiFetch(`/api/reports/session/${sessionId}/teacher-report`, {}, auth));
+    }
+
+    Promise.all(requests)
       .then(([rep, learner, teacher]) => {
         setReport(rep);
         setLearnerFeedback(learner);
-        setTeacherReport(teacher);
+        setTeacherReport(teacher || null);
+        if (!canViewTeacherReports && tab === "teacher") setTab("learner");
       })
       .catch((err) => {
         console.error("Failed to load report", err);
         setError("Failed to load report");
       })
       .finally(() => setLoading(false));
-  }, [sessionId]);
+  }, [sessionId, canViewTeacherReports]);
 
   if (!sessionId) return null;
   if (loading) return <div className="p-4">Loading report...</div>;
   if (error) return <div className="p-4 text-red-600">{error}</div>;
+
+  const stopped = report?.stopped || learnerFeedback?.stopped || teacherReport?.stopped || null;
+  const attributeProfile =
+    report?.attributeProfile ||
+    learnerFeedback?.attributeProfile ||
+    teacherReport?.attributeProfile ||
+    [];
+  const stopDetails = measurementStopDetails(stopped);
 
   return (
     <div className="p-4 border rounded bg-white">
@@ -66,7 +86,22 @@ export default function SessionReport({ sessionId, onClose }) {
         )}
       </div>
 
-      {/* Tabs */}
+      {(stopped || attributeProfile.length > 0) && (
+        <div className="mb-4 p-3 border rounded bg-green-50" data-testid="report-header-measurement">
+          {stopped ? (
+            <>
+              <p className="font-medium">{measurementStopHeading(stopped)}</p>
+              {stopped.reason && (
+                <p className="text-sm text-gray-700 mt-1">{stopped.reason}</p>
+              )}
+            </>
+          ) : (
+            <p className="font-medium">Attribute profile</p>
+          )}
+          <AttributeProfileList attributes={attributeProfile.length ? attributeProfile : stopDetails} />
+        </div>
+      )}
+
       <div className="mb-4 flex space-x-2">
         <button
           className={`px-3 py-1 rounded ${tab === "learner" ? "bg-purple-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
@@ -74,12 +109,14 @@ export default function SessionReport({ sessionId, onClose }) {
         >
           Learner Feedback
         </button>
-        <button
-          className={`px-3 py-1 rounded ${tab === "teacher" ? "bg-green-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
-          onClick={() => setTab("teacher")}
-        >
-          Teacher Report
-        </button>
+        {canViewTeacherReports && (
+          <button
+            className={`px-3 py-1 rounded ${tab === "teacher" ? "bg-green-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
+            onClick={() => setTab("teacher")}
+          >
+            Teacher Report
+          </button>
+        )}
         <button
           className={`px-3 py-1 rounded ${tab === "raw" ? "bg-blue-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
           onClick={() => setTab("raw")}
@@ -88,12 +125,26 @@ export default function SessionReport({ sessionId, onClose }) {
         </button>
       </div>
 
-      {/* Content */}
       {tab === "learner" && learnerFeedback && (
         <div className="space-y-3">
           <h3 className="font-semibold">Summary</h3>
           <p className="text-gray-700">Level: {learnerFeedback.summary?.level}</p>
           <p className="text-gray-700">{learnerFeedback.summary?.message}</p>
+
+          {stopped && (
+            <div>
+              <h4 className="font-semibold">Why this session ended</h4>
+              <p className="text-gray-700">{measurementStopHeading(stopped)}</p>
+              {stopped.reason && <p className="text-sm text-gray-600">{stopped.reason}</p>}
+            </div>
+          )}
+
+          {attributeProfile.length > 0 && (
+            <div>
+              <h4 className="font-semibold">Attribute profile</h4>
+              <AttributeProfileList attributes={attributeProfile} />
+            </div>
+          )}
 
           {learnerFeedback.strengths?.length > 0 && (
             <div>
@@ -126,11 +177,11 @@ export default function SessionReport({ sessionId, onClose }) {
         </div>
       )}
 
-      {tab === "teacher" && teacherReport && (
+      {tab === "teacher" && canViewTeacherReports && teacherReport && (
         <div className="space-y-3">
           <h3 className="font-semibold">Teacher Report</h3>
             <p className="text-gray-700">
-            Strategy: {teacherReport.strategy}
+            Strategy: {teacherReport.selectionStrategy || teacherReport.strategy}
               {teacherReport.nextTaskPolicy?.policyId && (
                 <span className="ml-2 text-sm text-gray-600">
                   (Policy: {getPolicyName(teacherReport.nextTaskPolicy.policyId)})
@@ -139,6 +190,21 @@ export default function SessionReport({ sessionId, onClose }) {
             </p>
           {teacherReport.studentName && (
             <p className="text-gray-700">Student: {teacherReport.studentName}</p>
+          )}
+
+          {stopped && (
+            <div>
+              <h4 className="font-semibold">Stop reason</h4>
+              <p className="text-gray-700">{measurementStopHeading(stopped)}</p>
+              {stopped.reason && <p className="text-sm text-gray-600">{stopped.reason}</p>}
+            </div>
+          )}
+
+          {attributeProfile.length > 0 && (
+            <div>
+              <h4 className="font-semibold">Attribute profile</h4>
+              <AttributeProfileList attributes={attributeProfile} />
+            </div>
           )}
 
           <div>

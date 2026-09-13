@@ -1,8 +1,9 @@
 // server/routes/api/reportsRoutes.js
 import express from "express";
-import { authenticateToken } from "../utils/authMiddleware.js";
+import { authenticateToken, authorizeRole } from "../utils/authMiddleware.js";
 import { loadDB } from "../../src/utils/db-server.js";
 import { dbAdapter } from "../utils/dbAdapter.js";
+import { sessionMeasurementReport } from "../delivery/sessionReportMeasurement.js";
 
 
 const router = express.Router();
@@ -11,6 +12,16 @@ const router = express.Router();
 // (Previously this file had no auth check at all — added as part of the
 // Phase 1 security hardening pass; see AUTH_SECURITY_FIXES.md.)
 router.use(authenticateToken);
+
+// D59: teacher-report payloads (per-session teacher report, class, and
+// district) are staff-only. Authenticate-only was the examinee leak —
+// any logged-in student could GET /session/:id/teacher-report. Matches
+// rolePermissions.js `teacherReports` (admin / district / teacher).
+// Learner feedback and the generic session report stay open to any
+// authenticated role: students may read their own session's learner
+// view. Ownership-scoping (a student may only read THEIR session) is
+// the same outstanding gap sessionRoutes.js already names.
+const canViewTeacherReports = authorizeRole(["admin", "district", "teacher"]);
 
 // ------------------------------
 // GET /api/reports/session/:id
@@ -34,6 +45,8 @@ router.get("/session/:id", (req, res) => {
     policyDetails = policies.find(p => p.type === session.selectionStrategy);
   }
 
+  const measurement = sessionMeasurementReport(session);
+
   const report = {
     sessionId: id,
     student: student ? { id: student.id, name: student.name } : null,
@@ -50,6 +63,8 @@ router.get("/session/:id", (req, res) => {
     captured: [], // new: evidence & observations from tasks
     constructs: [],
     recommendations: [],
+    stopped: measurement.stopped,
+    attributeProfile: measurement.attributeProfile,
   };
 
   // 🔹 Captured evidence/observations (from Task Instances)
@@ -86,6 +101,16 @@ router.get("/session/:id", (req, res) => {
       });
     }
     report.recommendations.push("Focus on nodes with highest uncertainty.");
+  }
+
+  for (const row of measurement.attributeProfile) {
+    report.constructs.push({
+      type: "AttributeProfile",
+      smvId: row.smvId,
+      classification: row.classification,
+      expectedClassificationAccuracy: row.expectedClassificationAccuracy,
+      estimate: row.estimate,
+    });
   }
 
   if (report.recommendations.length === 0) {
@@ -166,6 +191,8 @@ router.get("/session/:id/learner-feedback", (req, res) => {
     policyDetails = policies.find(p => p.type === session.selectionStrategy);
   }
 
+  const measurement = sessionMeasurementReport(session);
+
   const feedback = {
     sessionId: id,
     policy: policyDetails
@@ -179,7 +206,9 @@ router.get("/session/:id/learner-feedback", (req, res) => {
     strengths: [],
     focusAreas: [],
     nextSteps: [],
-    encouragement: "Great effort! Keep practicing."
+    encouragement: "Great effort! Keep practicing.",
+    stopped: measurement.stopped,
+    attributeProfile: measurement.attributeProfile,
   };
 
   // IRT version
@@ -213,6 +242,19 @@ router.get("/session/:id/learner-feedback", (req, res) => {
     }
   }
 
+  for (const row of measurement.attributeProfile) {
+    if (row.classification === "master") feedback.strengths.push(row.smvId);
+    else if (row.classification === "nonmaster") feedback.focusAreas.push(row.smvId);
+  }
+
+  if (measurement.stopped?.reason && !feedback.summary.message) {
+    feedback.summary.message = measurement.stopped.reason;
+  }
+  if (measurement.attributeProfile.length > 0 && !feedback.summary.level) {
+    const mastered = measurement.attributeProfile.filter((r) => r.classification === "master").length;
+    feedback.summary.level = `${mastered} of ${measurement.attributeProfile.length} attributes classified as mastered`;
+  }
+
   res.json(feedback);
 });
 
@@ -221,7 +263,7 @@ router.get("/session/:id/learner-feedback", (req, res) => {
 // ------------------------------
 // GET /api/reports/session/:id/teacher-report
 // ------------------------------
-router.get("/session/:id/teacher-report", (req, res) => {
+router.get("/session/:id/teacher-report", canViewTeacherReports, (req, res) => {
   const { id } = req.params;
   const db = loadDB();
   const session = db.sessions.find(s => s.id === id);
@@ -248,6 +290,8 @@ router.get("/session/:id/teacher-report", (req, res) => {
     const constructMap = Object.fromEntries((em.constructs || []).map((c) => [c.id, c]));
     evidenceModelMap[em.id] = { ...em, _obsMap: obsMap, _constructMap: constructMap };
   }
+
+  const measurement = sessionMeasurementReport(session);
 
   const report = {
     sessionId: id,
@@ -306,7 +350,9 @@ router.get("/session/:id/teacher-report", (req, res) => {
     recommendations: {
       groupLevel: [],
       individualLevel: []
-    }
+    },
+    stopped: measurement.stopped,
+    attributeProfile: measurement.attributeProfile,
   };
 
   // 🔹 IRT summary
@@ -345,6 +391,20 @@ router.get("/session/:id/teacher-report", (req, res) => {
     report.recommendations.groupLevel.push("Review group-level trends to identify systemic weaknesses.");
   }
 
+  if (measurement.attributeProfile.length > 0) {
+    report.modelSummary.AttributeProfile = Object.fromEntries(
+      measurement.attributeProfile.map((row) => [
+        row.smvId,
+        {
+          classification: row.classification,
+          expectedClassificationAccuracy: row.expectedClassificationAccuracy,
+          estimate: row.estimate,
+          masteryThreshold: row.masteryThreshold,
+        },
+      ])
+    );
+  }
+
   // 🔹 Generic fallback
   if (Object.keys(report.modelSummary).length === 0) {
     report.recommendations.individualLevel.push("Complete more tasks to build a measurable profile.");
@@ -356,7 +416,7 @@ router.get("/session/:id/teacher-report", (req, res) => {
 // ------------------------------
 // GET /api/reports/teacher/class/:classId
 // ------------------------------
-router.get("/teacher/class/:classId", (req, res) => {
+router.get("/teacher/class/:classId", canViewTeacherReports, (req, res) => {
   const { classId } = req.params;
   const db = loadDB();
 
@@ -525,7 +585,7 @@ router.get("/teacher/class/:classId", (req, res) => {
 // ------------------------------
 // GET /api/reports/teacher/district/:districtId
 // ------------------------------
-router.get("/teacher/district/:districtId", (req, res) => {
+router.get("/teacher/district/:districtId", canViewTeacherReports, (req, res) => {
   const { districtId } = req.params;
   const db = loadDB();
 
@@ -737,13 +797,17 @@ router.get("/teacher/district/:districtId", (req, res) => {
 router.get("/dashboard", async (req, res) => {
   try {
     const {
-      role = "teacher",
       districtId,
       teacherId,
       studentId,
       startDate,
       endDate,
     } = req.query;
+
+    // D59: the caller's role comes from the token, not from `?role=`.
+    // The query string used to let any authenticated user request the
+    // teacher/admin dashboard payload.
+    const role = req.user?.role || "student";
 
     const [sessions, tasks, students] = await Promise.all([
       dbAdapter.list("sessions"),
@@ -765,8 +829,9 @@ router.get("/dashboard", async (req, res) => {
       scopedStudents = students.filter((s) => s.teacherId === teacherId);
     }
 
-    if (role === "student" && studentId) {
-      scopedStudents = students.filter((s) => s.id === studentId);
+    if (role === "student") {
+      const selfId = studentId || req.user?.username;
+      scopedStudents = students.filter((s) => s.id === selfId);
     }
 
     const scopedStudentIds = scopedStudents.map((s) => s.id);
