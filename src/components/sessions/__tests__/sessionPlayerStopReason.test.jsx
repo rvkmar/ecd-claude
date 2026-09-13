@@ -78,12 +78,11 @@ describe("SessionPlayer — measurement stop copy (D58)", () => {
       </MemoryRouter>
     );
 
-    expect(
-      await screen.findByText("Measurement target met", { selector: "p.font-medium" })
-    ).toBeInTheDocument();
-    expect(screen.getAllByText(STOPPED.reason).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText(/attrA: master/)).toBeInTheDocument();
-    expect(screen.getByTestId("session-detail-stop")).toHaveTextContent("Measurement target met");
+    expect(await screen.findByTestId("session-detail-stop")).toHaveTextContent(
+      "Measurement target met"
+    );
+    expect(await screen.findByText(/attrA: master/)).toBeInTheDocument();
+    expect(screen.getByText(STOPPED.reason)).toBeInTheDocument();
     expect(screen.queryByText("No more tasks available.")).toBeNull();
 
     await waitFor(() => {
