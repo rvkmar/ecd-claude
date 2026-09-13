@@ -54,7 +54,7 @@ D59 therefore gated the existing teacher routes, stopped the client asking for t
 | | |
 |---|---|
 | D59 files | role-split route tests; SessionReport + SessionList render tests; classification profile unit tests; `rolePermissions` leak assertion |
-| Relevant vitest | see close notes / CI |
+| Relevant vitest | **130/130** across the 9 D59 + routeAuth + repoGuards files; plus measurementStop / collectionSurface / RequirePermission (**15/15**) and sessionRoutes + sessionResponseValidation (**51/51**) |
 | Browser | not walked this session — report UI is covered by component tests; the live player stop screen remains D58's `s1789288381307` walk |
 | D60 | not started |
 
