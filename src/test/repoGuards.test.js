@@ -420,31 +420,40 @@ const OPEN_BY_DESIGN_RAW_API_FETCH = new Map([
 
 const API_CLIENT_REL = "src/api/apiClient.js";
 
+// Same-line: fetch("/api…") / fetch('/api…') / fetch(`/api…`)
+// and the window.fetch form the deleted interceptor tests used.
+const RAW_API_FETCH_SAME_LINE = /\b(?:window\.)?fetch\s*\(\s*(['"`])\/api\b/;
+// Multiline: fetch(\n  "/api…")
+const RAW_API_FETCH_SPLIT_LINE = /\b(?:window\.)?fetch\s*\(\s*[\r\n]\s*(['"`])\/api\b/;
+
+function rawApiFetchOffendersIn(rel, source) {
+  const text = liveCode(source);
+  const offenders = [];
+  const lines = text.split("\n");
+  lines.forEach((line, i) => {
+    if (RAW_API_FETCH_SAME_LINE.test(line)) offenders.push(`${rel}:${i + 1}`);
+  });
+  if (
+    RAW_API_FETCH_SPLIT_LINE.test(text) &&
+    !lines.some((line) => RAW_API_FETCH_SAME_LINE.test(line))
+  ) {
+    const idx = text.search(/\b(?:window\.)?fetch\s*\(/);
+    const lineNo = text.slice(0, idx).split("\n").length;
+    offenders.push(`${rel}:${lineNo}`);
+  }
+  return offenders;
+}
+
 function findRawApiFetches() {
   const srcRoot = path.join(ROOT, "src");
   const files = walkAllJs(srcRoot).filter((f) => !PROD_SKIP.test(f));
   const offenders = [];
-  // Same-line: fetch("/api…") / fetch('/api…') / fetch(`/api…`)
-  // and the window.fetch form the deleted interceptor tests used.
-  const sameLine = /\b(?:window\.)?fetch\s*\(\s*(['"`])\/api\b/;
-  // Multiline: fetch(\n  "/api…")
-  const splitLine = /\b(?:window\.)?fetch\s*\(\s*[\r\n]\s*(['"`])\/api\b/;
 
   for (const file of files) {
     const rel = path.relative(ROOT, file).replace(/\\/g, "/");
     if (rel === API_CLIENT_REL) continue;
     if (OPEN_BY_DESIGN_RAW_API_FETCH.has(rel)) continue;
-
-    const text = liveCode(fs.readFileSync(file, "utf-8"));
-    const lines = text.split("\n");
-    lines.forEach((line, i) => {
-      if (sameLine.test(line)) offenders.push(`${rel}:${i + 1}`);
-    });
-    if (splitLine.test(text) && !lines.some((line) => sameLine.test(line))) {
-      const idx = text.search(/\b(?:window\.)?fetch\s*\(/);
-      const lineNo = text.slice(0, idx).split("\n").length;
-      offenders.push(`${rel}:${lineNo}`);
-    }
+    offenders.push(...rawApiFetchOffendersIn(rel, fs.readFileSync(file, "utf-8")));
   }
   return offenders;
 }
@@ -481,28 +490,39 @@ describe("every /api call goes through apiFetch", () => {
     ).toEqual([]);
   });
 
-  it("fails when a raw /api fetch is reintroduced, then passes once removed", () => {
-    const probeRel = "src/components/ui/__apifetch_guard_probe__.jsx";
-    const probe = path.join(ROOT, probeRel);
-    fs.writeFileSync(
-      probe,
-      `export function probe() {\n  return fetch("/api/foo");\n}\n`
-    );
-    try {
-      const withProbe = findRawApiFetches();
-      expect(
-        withProbe.some((o) => o.startsWith(probeRel)),
-        `Guard did not fail after inserting fetch("/api/foo") in a component. ` +
-          `Offenders were:\n${withProbe.join("\n")}`
-      ).toBe(true);
-    } finally {
-      fs.unlinkSync(probe);
-    }
+  // Two full-tree walks (~3s each on WSL / a cold disk) overflow Vitest 5's
+  // default 5000ms — the same class of flake as routeAuth's cold-import
+  // budget, not a false guard. The mutation still uses the guard's own
+  // detector (rawApiFetchOffendersIn); it just does not re-walk src/ twice.
+  it(
+    "fails when a raw /api fetch is reintroduced, then passes once removed",
+    () => {
+      const probeRel = "src/components/ui/__apifetch_guard_probe__.jsx";
+      const probe = path.join(ROOT, probeRel);
+      fs.writeFileSync(
+        probe,
+        `export function probe() {\n  return fetch("/api/foo");\n}\n`
+      );
+      try {
+        const withProbe = rawApiFetchOffendersIn(
+          probeRel,
+          fs.readFileSync(probe, "utf-8")
+        );
+        expect(
+          withProbe.some((o) => o.startsWith(probeRel)),
+          `Guard did not fail after inserting fetch("/api/foo") in a component. ` +
+            `Offenders were:\n${withProbe.join("\n")}`
+        ).toBe(true);
+      } finally {
+        fs.unlinkSync(probe);
+      }
 
-    const withoutProbe = findRawApiFetches();
-    expect(
-      withoutProbe.some((o) => o.startsWith(probeRel)),
-      "Guard still reported the probe after it was removed"
-    ).toBe(false);
-  });
+      // walkAllJs only sees files that exist, so a deleted probe cannot be
+      // an offender. Re-reading it would throw; existence is the "removed" half.
+      expect(fs.existsSync(probe), "Guard still reported the probe after it was removed").toBe(
+        false
+      );
+    },
+    15000
+  );
 });
