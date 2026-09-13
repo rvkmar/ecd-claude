@@ -17,6 +17,13 @@ const SCAN_DIRS = ["src", "server"];
 // spelling it's rewriting away from.
 const SKIP_DIRS = new Set(["node_modules", "dist", "__tests__", "test", "migrations"]);
 
+// WSL / a cold disk walks src/ (+ server for spelling and dead-exports)
+// in ~3–6s. Vitest 5's default 5000ms then times out a real scan, not a
+// false guard — same class of flake as routeAuth's cold-import budget.
+// Every test that calls walk / walkAllJs / findRawApiFetches over the tree
+// uses this so the next slow machine does not flake them one by one.
+const FULL_TREE_SCAN_TIMEOUT_MS = 15000;
+
 function walk(dir, files = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (SKIP_DIRS.has(entry.name)) continue;
@@ -41,7 +48,9 @@ function isCodeOccurrence(line, needle) {
 }
 
 describe("session status spelling", () => {
-  it("never re-introduces the legacy hyphenated \"in-progress\" status", () => {
+  it(
+    "never re-introduces the legacy hyphenated \"in-progress\" status",
+    () => {
     const files = SCAN_DIRS.flatMap((d) => walk(path.join(ROOT, d)));
     const offenders = [];
 
@@ -60,7 +69,9 @@ describe("session status spelling", () => {
         `Use SESSION_STATUS.IN_PROGRESS from src/utils/sessionStatus.js instead:\n` +
         offenders.join("\n")
     ).toEqual([]);
-  });
+    },
+    FULL_TREE_SCAN_TIMEOUT_MS
+  );
 });
 
 describe("every write route declares a role gate", () => {
@@ -367,7 +378,9 @@ describe("nothing is done until something calls it (server)", () => {
 
   const dead = findDead();
 
-  it("no NEW server export ships without a production caller", () => {
+  it(
+    "no NEW server export ships without a production caller",
+    () => {
     const unexplained = dead.filter((d) => !DEAD_EXPORT_BASELINE.has(d));
 
     expect(
@@ -382,9 +395,13 @@ describe("nothing is done until something calls it (server)", () => {
         `\n\nEither give it a caller, delete it (or just its \`export\`), or add ` +
         `it to DEAD_EXPORT_BASELINE with a real reason.`
     ).toEqual([]);
-  });
+    },
+    FULL_TREE_SCAN_TIMEOUT_MS
+  );
 
-  it("the baseline does not rot — an export that gained a caller leaves the list", () => {
+  it(
+    "the baseline does not rot — an export that gained a caller leaves the list",
+    () => {
     const resurrected = [...DEAD_EXPORT_BASELINE.keys()].filter((k) => !dead.includes(k));
 
     expect(
@@ -393,7 +410,9 @@ describe("nothing is done until something calls it (server)", () => {
         `Remove them from the baseline, or the list becomes a place dead code ` +
         `hides:\n` + resurrected.join("\n")
     ).toEqual([]);
-  });
+    },
+    FULL_TREE_SCAN_TIMEOUT_MS
+  );
 });
 
 /* ============================================================
@@ -459,7 +478,9 @@ function findRawApiFetches() {
 }
 
 describe("every /api call goes through apiFetch", () => {
-  it("no live src/ file issues a raw fetch() to /api", () => {
+  it(
+    "no live src/ file issues a raw fetch() to /api",
+    () => {
     const offenders = findRawApiFetches();
 
     expect(
@@ -471,9 +492,13 @@ describe("every /api call goes through apiFetch", () => {
         `use apiFetch belongs in OPEN_BY_DESIGN_RAW_API_FETCH with a reason.\n\n` +
         offenders.join("\n")
     ).toEqual([]);
-  });
+    },
+    FULL_TREE_SCAN_TIMEOUT_MS
+  );
 
-  it("the allowlist does not rot — a file that no longer raw-fetches /api leaves it", () => {
+  it(
+    "the allowlist does not rot — a file that no longer raw-fetches /api leaves it",
+    () => {
     const srcRoot = path.join(ROOT, "src");
     const files = new Set(
       walkAllJs(srcRoot)
@@ -488,7 +513,9 @@ describe("every /api call goes through apiFetch", () => {
         `Remove them or the list becomes a place exemptions hide:\n` +
         stale.join("\n")
     ).toEqual([]);
-  });
+    },
+    FULL_TREE_SCAN_TIMEOUT_MS
+  );
 
   // Two full-tree walks (~3s each on WSL / a cold disk) overflow Vitest 5's
   // default 5000ms — the same class of flake as routeAuth's cold-import
@@ -523,6 +550,6 @@ describe("every /api call goes through apiFetch", () => {
         false
       );
     },
-    15000
+    FULL_TREE_SCAN_TIMEOUT_MS
   );
 });
